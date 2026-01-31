@@ -1,0 +1,6 @@
+#!/bin/sh
+
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+echo "$(date +%Y%m%d_%H%M%S) $@" >> "$SCRIPT_DIR/adb_command_log.txt"
+exec python3 "$SCRIPT_DIR/adb_wrapper.py" "$@"

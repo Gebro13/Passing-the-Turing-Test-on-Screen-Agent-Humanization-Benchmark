@@ -1,0 +1,18 @@
+{
+    "recorder": {
+        "conda_env": "recorder_env"
+    },
+    "mobile_agent_e": {
+        "dir": "/path/to/mobile_agent_e",
+        "conda_env": "mobile_agent_e_env"
+    },
+    "ui_tars": {
+        "dir": "/path/to/ui_tars",
+        "conda_env": "ui_tars_env"
+    },
+    "cpm_gui_agent": {
+        "dir": "/path/to/cpm_gui_agent",
+        "conda_env": "cpm_gui_agent_env"
+    }
+}
+
