@@ -1,20 +1,20 @@
 import matplotlib.pyplot as plt
-from controller import FingerEvent
-from typing import Iterator, Optional
+from analysis.lib.motionevent_classes import FingerEvent
+from typing import List, Optional, Tuple
 import argparse
 import numpy as np
-from gesture_log_reader_utils import single_trace_generator, file_reader_yield
+from analysis.lib.gesture_log_reader_utils import single_trace_generator, file_reader_yield
 
-def throw_away_timestamp(gesture_generator: Iterator[list[FingerEvent]]) -> list[list[tuple[int, int]]]:
+def throw_away_timestamp(gesture_generator: List[List[FingerEvent]]) -> List[List[Tuple[int, int]]]:
     """
     Convert FingerEvent traces to a list of (x, y) tuples, discarding timestamps.
     """
-    gestures = []
+    gestures: List[List[Tuple[int, int]]] = []
     for gesture in gesture_generator:
         gestures.append([(event.x, event.y) for event in gesture])
     return gestures
 
-def plot_gestures(gestures):
+def plot_gestures(gestures: List[List[Tuple[int, int]]], have_legend: bool = True) -> None:
     plt.figure(figsize=(10, 8))
 
     for i, gesture in enumerate(gestures):
@@ -22,7 +22,7 @@ def plot_gestures(gestures):
         if x_coords[0] is None or y_coords[0] is None:
             # this is a problem of getevent, so not fixable.
             # but we can skip this point.
-            print("Gesture {i+1} begin with None coordinates, skipping this point.")
+            print(f"Gesture {i+1} begins with None coordinates, skipping this point.")
             x_coords = x_coords[1:]
             y_coords = y_coords[1:]
         # https://www.tutorialspoint.com/how-do-i-specify-an-arrow-like-linestyle-in-matplotlib
@@ -32,7 +32,8 @@ def plot_gestures(gestures):
     plt.xlabel('X Coordinate')
     plt.ylabel('Y Coordinate')
     plt.title('Detected Gestures from MotionEvent Log')
-    plt.legend()
+    if have_legend:
+        plt.legend()
     plt.grid(True)
     # x window 0-1078, y window 0-1918
     plt.tight_layout()
@@ -42,6 +43,10 @@ def plot_gestures(gestures):
     plt.gca().set_aspect('equal', adjustable='box')
     plt.gca().xaxis.set_ticks_position('top')
     plt.show()
+
+def plot_gestures_2(gesture_generator: List[List[FingerEvent]]) -> None:
+    gestures = throw_away_timestamp(gesture_generator)
+    plot_gestures(gestures)
 
 def save_gestures(gestures, output_path):
     import json
@@ -60,11 +65,11 @@ if __name__ == "__main__":
 
     gestures = throw_away_timestamp(single_trace_generator(file_reader_yield(args.file_path), args.thres_after_1st_menu_s))
 
-    print(f"总共识别到 {len(gestures)} 个手势操作")
+    print(f"Detected {len(gestures)} gestures in total")
     for idx, gesture in enumerate(gestures, 1):
-        print(f"手势 {idx} 有 {len(gesture)} 个坐标点")
+        print(f"Gesture {idx} has {len(gesture)} coordinate points")
 
     save_gestures(gestures, args.output_path)
-    print(f"手势数据已保存到 {args.output_path}")
+    print(f"Gesture data saved to {args.output_path}")
 
     plot_gestures(gestures)

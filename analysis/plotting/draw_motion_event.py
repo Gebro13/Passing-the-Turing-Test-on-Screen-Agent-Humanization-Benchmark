@@ -3,11 +3,11 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 def hex_to_dec(hex_str):
-    """16进制转10进制"""
+    """Hexadecimal to decimal conversion"""
     return int(hex_str, 16)
 
 def parse_motionevent_log(file_path):
-    """解析 motionevent 日志，提取XY坐标"""
+    """Parse motionevent log and extract X/Y coordinates"""
     with open(file_path, 'r', encoding='utf-8') as file:
         lines = file.readlines()
 
@@ -29,7 +29,7 @@ def parse_motionevent_log(file_path):
         if y_match:
             y_current = hex_to_dec(y_match.group(1))
         
-        # 每次 SYN_REPORT 时确认记录当前坐标
+        # Record current coordinates on each SYN_REPORT
         if "SYN_REPORT" in line and x_current is not None and y_current is not None:
             x_coords.append(x_current)
             y_coords.append(y_current)
@@ -37,12 +37,12 @@ def parse_motionevent_log(file_path):
     return np.array(x_coords), np.array(y_coords)
 
 def fit_line(x, y):
-    """最小二乘法拟合直线 y = kx + b"""
+    """Least squares fit for line y = kx + b"""
     k, b = np.polyfit(x, y, 1)
     return k, b
 
 def plot_results(x, y, k, b):
-    """绘制触摸点及拟合直线"""
+    """Plot touch points and fitted line"""
     plt.figure(figsize=(8, 6))
     plt.scatter(x, y, color='blue', label='Touch Points')
     
@@ -55,7 +55,7 @@ def plot_results(x, y, k, b):
     plt.title('Touchscreen MotionEvent Trajectory')
     plt.legend()
     plt.grid(True)
-    plt.gca().invert_yaxis()  # y轴翻转，以符合屏幕坐标系
+    plt.gca().invert_yaxis()  # invert y-axis to match screen coordinate system
     plt.show()
 
 if __name__ == "__main__":
@@ -64,6 +64,6 @@ if __name__ == "__main__":
     print(x,y)
     k, b = fit_line(x, y)
 
-    print(f"拟合直线方程: y = {k:.4f}x + {b:.4f}")
+    print(f"fit a linear equation: y = {k:.4f}x + {b:.4f}")
 
     plot_results(x, y, k, b)
