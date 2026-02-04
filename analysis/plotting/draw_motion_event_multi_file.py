@@ -7,7 +7,7 @@ from analysis.lib.motionevent_classes import FingerEvent
 from analysis.processing.extract_feature_of_swipes import cleanse_into_swipe
 from analysis.processing.tap_duration_extract import leave_taps
 from analysis.processing.interval_extract import filter_null
-from draw_motion_event2 import throw_away_timestamp, plot_gestures
+from analysis.plotting.draw_motion_event2 import throw_away_timestamp, plot_gestures
 from functools import partial
 import matplotlib.pyplot as plt
 

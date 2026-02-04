@@ -1,7 +1,7 @@
 from typing import Optional, List, Dict, Tuple, Callable
 import re
 from re import Match
-from motionevent_classes import FingerEvent, SessionType
+from analysis.lib.motionevent_classes import FingerEvent, SessionType
 from pathlib import Path
 import pandas as pd
 import os

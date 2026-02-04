@@ -1,6 +1,6 @@
 # The goal is to provide a class that can yield swipes according to the (x1, y1) -> (x2, y2) requirement.
 
-from motionevent_classes import FingerEvent
+from analysis.lib.motionevent_classes import FingerEvent
 from typing import List, Tuple
 def euclidean_distance(xy1: Tuple[float, float], xy2: Tuple[float, float]) -> float:
     return abs(complex(*xy1) - complex(*xy2))

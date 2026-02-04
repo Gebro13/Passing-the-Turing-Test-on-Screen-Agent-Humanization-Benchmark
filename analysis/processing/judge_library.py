@@ -3,16 +3,16 @@ from scipy.interpolate import make_interp_spline
 from scipy.signal import savgol_filter
 from scipy.stats import norm, kstest
 from sklearn.metrics import mean_squared_error
-from motionevent_classes import FingerEvent
+from analysis.lib.motionevent_classes import FingerEvent
 from typing import Dict, Tuple, TypedDict, List
 
-from gesture_log_reader_utils import SessionType
-from tap_duration_extract import is_tap
-from calculate_roc_auc_from_feature import get_numeric_feature_column_names, get_feature_columns, ThresholdPosterior
+from analysis.lib.gesture_log_reader_utils import SessionType
+from analysis.processing.tap_duration_extract import is_tap
+from analysis.processing.calculate_roc_auc_from_feature import get_numeric_feature_column_names, get_feature_columns, ThresholdPosterior
 import numpy as np
 from sklearn.pipeline import Pipeline
 from xgboost import XGBClassifier
-from extract_feature_of_swipes import build_features_dataframe
+from analysis.processing.extract_feature_of_swipes import build_features_dataframe
 
 def swipe_judger(single_finger_trace: List[FingerEvent]) -> bool:
     """

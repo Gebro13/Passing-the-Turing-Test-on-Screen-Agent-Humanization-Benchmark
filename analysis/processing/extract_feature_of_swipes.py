@@ -8,9 +8,9 @@ from typing import List, Dict, Optional, Tuple
 
 import pandas as pd
 
-from motionevent_classes import FingerEvent
-from feature_library import extract_features
-from gesture_log_reader_utils import filtered_gesture_generator_from_files_no_timestamp
+from analysis.lib.motionevent_classes import FingerEvent
+from analysis.lib.feature_library import extract_features
+from analysis.lib.gesture_log_reader_utils import filtered_gesture_generator_from_files_no_timestamp
 
 def cleanse_into_swipe(swipe: List[FingerEvent]) -> Optional[List[FingerEvent]]:
     """

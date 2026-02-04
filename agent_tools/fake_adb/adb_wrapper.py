@@ -23,14 +23,14 @@ except ImportError:
     )
 
 # Ensure the current directory is in python path to import local modules
-proj_folder = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+proj_folder = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 try:
     
-    sys.path.append(proj_folder)
-    from motionevent_classes import GotEvent, FingerEvent
-    from fit_effort_provider import FitEffortProvider, bot_line_fit
+    sys.path.append(proj_folder) # very necessary since we may call this file from other directories
+    from analysis.lib.motionevent_classes import GotEvent, FingerEvent
+    from analysis.processing.fit_effort_provider import FitEffortProvider, bot_line_fit
 except ImportError as e:
     print(f"Wrapper Error: Could not import dependencies: {e}", file=sys.stderr)
     sys.exit(1)
@@ -103,11 +103,12 @@ class MotionGenerator:
     def init_provider():
         if MotionGenerator.static_fit_effort_provider is None:
             try:
-                pkl_path = os.path.join(proj_folder, "swipe_data.pkl")
+                pkl_path = os.path.join(proj_folder, "analysis", "processing", "swipe_data.pkl")
                 with open(pkl_path, "rb") as f:
-                    MotionGenerator.static_fit_effort_provider = FitEffortProvider(pickle.load(f))
-            except Exception as e:
-                print(f"Warning: Could not load swipe_data.pkl: {e}", file=sys.stderr)
+                    pickled: List[List[FingerEvent]] = pickle.load(f)
+                    MotionGenerator.static_fit_effort_provider = FitEffortProvider(pickled)
+            except FileNotFoundError as e:
+                print(f"Warning: Could not find swipe_data.pkl: {e}", file=sys.stderr)
 
     @staticmethod
     def generate_swipe_trace(x1, y1, x2, y2, duration_us = 500 * 1000, neighbor_time_delta_us: int = GLOBAL_EVENT_INTERVAL_US, fake_human: bool = False, verbose: bool = False) -> List[FingerEvent]:
@@ -609,7 +610,7 @@ def main():
         sys.exit(run_real_adb(adb_path_list, args))
 
 
-LOCK_FILE = str(Path(proj_folder) / "fake_adb" / "adb_wrapper.lock")
+LOCK_FILE = str(Path(proj_folder) / "agent_tools" / "fake_adb" / "adb_wrapper.lock")
 
 if __name__ == "__main__":
     # Open lock file

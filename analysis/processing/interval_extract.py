@@ -6,8 +6,8 @@ from typing import List, Optional, Tuple, Dict, Literal, Iterator
 
 import pandas as pd
 
-from motionevent_classes import FingerEvent, SessionType
-from gesture_log_reader_utils import filtered_gesture_generator_from_files
+from analysis.lib.motionevent_classes import FingerEvent, SessionType
+from analysis.lib.gesture_log_reader_utils import filtered_gesture_generator_from_files
 import random
 
 def null_object_warning() -> None:

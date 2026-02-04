@@ -1,8 +1,9 @@
 import os
 import time
-from typing import Dict, List, Optional, Tuple, Callable
+from typing import Dict, List, Optional, Tuple, Callable, TypedDict
 import datetime
 import PIL.Image
+from pathlib import Path
 
 import threading
 
@@ -11,7 +12,31 @@ import json
 import random
 import pandas as pd
 
+
+
+
+COLLECTION_FOLDER_ABSOLUTE: Path = Path(__file__).resolve().parent
+PROJ_FOLDER_ABSOLUTE: Path = COLLECTION_FOLDER_ABSOLUTE.parent
+FAKE_ADB_PATH_ABSOLUTE: Path = PROJ_FOLDER_ABSOLUTE / "agent_tools" / "fake_adb"
+
+# assert the running folder is PROJ_FOLDER, otherwise throw error
+if Path.cwd() != PROJ_FOLDER_ABSOLUTE:
+    raise NotImplementedError("Please run this script from the project root folder.")
+    print(f"Changing working directory from {Path.cwd()} to project folder {PROJ_FOLDER_ABSOLUTE}")
+    os.chdir(PROJ_FOLDER_ABSOLUTE)
+
+with open(COLLECTION_FOLDER_ABSOLUTE / "automations_agents.json", "r") as f:
+    automations_agents_config = json.load(f)
+
+USER_NAME = os.getenv("USER")
+MACHINE_NAME = os.uname().nodename
+recorder_env = automations_agents_config["recorder"]["conda_env"]
+
+
 def fast_screenshot(adb_path: str = "adb") -> PIL.Image.Image:
+    image_save_path_folder = COLLECTION_FOLDER_ABSOLUTE / "screenshot"
+    image_save_path = image_save_path_folder / "screenshot.png"
+    
     if True:
         command = adb_path + " shell rm /sdcard/screenshot.png"
         os.system(command)
@@ -19,14 +44,14 @@ def fast_screenshot(adb_path: str = "adb") -> PIL.Image.Image:
         os.system(command)
         
         # if ./screenshot is not existent, then create the directory
-        if not os.path.exists("./screenshot"):
-            os.makedirs("./screenshot")
+        if not os.path.exists(image_save_path_folder):
+            os.makedirs(image_save_path_folder)
 
-        command = adb_path + " pull /sdcard/screenshot.png ./screenshot/screenshot.png"
+        command = adb_path + f" pull /sdcard/screenshot.png {image_save_path}"
         os.system(command)
     else:
         pass
-    image = PIL.Image.open("./screenshot/screenshot.png")
+    image = PIL.Image.open(image_save_path)
     # resize image to 1080x1920
     image = image.resize((1080, 1920))
     return image
@@ -138,7 +163,11 @@ def run_useless_action_loop_method_2(mean_interval: float = 1.1):
         sleep_time = poisson_interval(mean_interval)
         time.sleep(sleep_time)
         resume_event.wait()  # Wait until resumed
-        os.system("python fake_adb/adb_wrapper.py shell input fake custom_fake_action_3 2> /dev/null")
+
+        # get the absolute path of the file
+        fake_adb_py_path = FAKE_ADB_PATH_ABSOLUTE / "adb_wrapper.py"
+
+        os.system(f"python {fake_adb_py_path} shell input fake custom_fake_action_3 2> /dev/null")
 
 
 x_coords = [160, 420, 680, 940]
@@ -242,31 +271,21 @@ def general_get_app_func(app_name: str) -> Callable[[], None]:
 
 
 
-PROJ_FOLDER = os.path.dirname(os.path.abspath(__file__))
-FAKE_ADB_PATH = os.path.join(PROJ_FOLDER, "fake_adb")
-
-with open("automations_agents.json", "r") as f:
-    automations_agents_config = json.load(f)
-
-USER_NAME = os.getenv("USER")
-MACHINE_NAME = os.uname().nodename
-recorder_path = automations_agents_config["recorder"]["conda_env"]
-
-
+TIMESTAMP_RECORDER = COLLECTION_FOLDER_ABSOLUTE / "temp" / "timestamp_recorder.txt"
 
 
 def prepare_data_collection_session(tmux_session_name: str):
     """result: a new tmux session is created. No move on phone."""
     os.system(f"tmux new-session -d -s {tmux_session_name}")
     os.system(f"tmux send-keys -t {tmux_session_name} \"conda deactivate\" Enter")
-    os.system(f"tmux send-keys -t {tmux_session_name} \"conda activate {recorder_path}\" Enter")
+    os.system(f"tmux send-keys -t {tmux_session_name} \"conda activate {recorder_env}\" Enter")
 
 def start_another_data_collection(tmux_session_name: str):
     """
         condition: tmux session is already existent and prompting; phone screen already opened an app in foreground  
         result: still phone show app in foreground; a new data collection session started in tmux  
     """
-    os.system(f"tmux send-keys -t {tmux_session_name} \"python3 main.py --automatic_switch_app\" Enter")
+    os.system(f"tmux send-keys -t {tmux_session_name} \"python3 {COLLECTION_FOLDER_ABSOLUTE}/main.py --automatic_switch_app\" Enter")
 
 def halt_data_collection_session(tmux_session_name: str) -> str:
     """
@@ -293,7 +312,7 @@ def prepare_mobile_agent_e_session(tmux_session_name: str):
     os.system(f"tmux send-keys -t {tmux_session_name} \"conda deactivate && conda deactivate && conda activate {mobile_agent_e_conda_env}\" Enter")
     os.system(f"tmux send-keys -t {tmux_session_name} \"cd {mobile_agent_e_dir}\" Enter")
     os.system(f"tmux send-keys -t {tmux_session_name} \"source scripts/backend_variables.sh\" Enter")
-    os.system(f"tmux send-keys -t {tmux_session_name} \'export PATH={FAKE_ADB_PATH}:$PATH\' Enter") # pastbug: this is where the path gets contaminated. should use single quotes instead of double quotes.
+    os.system(f"tmux send-keys -t {tmux_session_name} \'export PATH={FAKE_ADB_PATH_ABSOLUTE}:$PATH\' Enter") # pastbug: this is where the path gets contaminated. should use single quotes instead of double quotes.
 
 def inject_mobile_agent_e_model_name(tmux_session_name: str, model_name: str):
     os.system(f"tmux send-keys -t {tmux_session_name} \"export OPENAI_MODEL_NAME={model_name}\" Enter")
@@ -310,7 +329,7 @@ def prepare_ui_tars_session(tmux_session_name: str):
     os.system(f"tmux new-session -d -s {tmux_session_name}")
     os.system(f"tmux send-keys -t {tmux_session_name} \"conda deactivate && conda deactivate && conda activate {ui_tars_conda_env}\" Enter")
     os.system(f"tmux send-keys -t {tmux_session_name} \"cd {ui_tars_dir}\" Enter")
-    os.system(f"tmux send-keys -t {tmux_session_name} \'export PATH={FAKE_ADB_PATH}:$PATH\' Enter")
+    os.system(f"tmux send-keys -t {tmux_session_name} \'export PATH={FAKE_ADB_PATH_ABSOLUTE}:$PATH\' Enter")
 
 def launch_ui_tars_experiment(tmux_session_name: str, experiment_name: str):
     os.system(f"tmux send-keys -t {tmux_session_name} \"npx @ui-tars/cli start -t adb -q \'{experiment_name}\'\" Enter")
@@ -392,7 +411,7 @@ def prepare_cpm_gui_agent_session(tmux_session_name: str):
     os.system(f"tmux new-session -d -s {tmux_session_name}")
     os.system(f"tmux send-keys -t {tmux_session_name} \"conda deactivate && conda deactivate && conda activate {default_cpm_gui_agent_conda_env}\" Enter")
     os.system(f"tmux send-keys -t {tmux_session_name} \"cd {default_cpm_gui_agent_dir}\" Enter")
-    os.system(f"tmux send-keys -t {tmux_session_name} \'export PATH={FAKE_ADB_PATH}:$PATH\' Enter")
+    os.system(f"tmux send-keys -t {tmux_session_name} \'export PATH={FAKE_ADB_PATH_ABSOLUTE}:$PATH\' Enter")
 
 def launch_cpm_gui_agent(tmux_session_name: str, experiment_name: str):
     os.system(f"tmux send-keys -t {tmux_session_name} \"python run_agent.py --task \'{experiment_name}\'\" Enter")
@@ -429,10 +448,10 @@ def do_a_cpm_gui_agent_experiment(callable_app_launch: Callable[[], None], exper
     return timestamp
 
 
-with open("app_name_translations.json", "r") as f:
+with open(COLLECTION_FOLDER_ABSOLUTE / "app_name_translations.json", "r") as f:
     translations: Dict[str, str] = json.load(f)
 
-def load_not_done_task_pair(attendee_name: str, task_file_path: str) -> Optional[Tuple[int, str, str]]:
+def load_not_done_task_pair(attendee_name: str, task_file_path: Path) -> Optional[Tuple[int, str, str]]:
     """
         if return none, no pending tasks for this attendee
         returns: first_empty_row_idx, app_name, task_description
@@ -457,11 +476,13 @@ def load_not_done_task_pair(attendee_name: str, task_file_path: str) -> Optional
         print(f"No pending tasks found for user {attendee_name}.")
         return None
 
-def write_timestamp_to_idx(task_file_path: str, attendee_name: str, empty_row_idx: int, timestamp: str):
+def write_timestamp_to_idx(task_file_path: Path, attendee_name: str, empty_row_idx: int, timestamp: str):
     df = pd.read_csv(task_file_path, header=0, dtype=str)
     df.at[df.index[empty_row_idx], attendee_name] = timestamp
     df.to_csv(task_file_path, index=False)
     print(f"Recorded completion time for user {attendee_name} in task file.")
+
+TASK_CSV_PATH = PROJ_FOLDER_ABSOLUTE / "tasks.csv"
 
 try:
     os.system("adb devices")
@@ -489,14 +510,14 @@ try:
         column_namer = "ui_tars_raw"
         experiment_func = do_an_ui_tars_experiment
         while True:
-            next_task = load_not_done_task_pair(column_namer, "tasks.csv")
+            next_task = load_not_done_task_pair(column_namer, TASK_CSV_PATH)
             if next_task is None:
                 break
             empty_row_idx, app_name, task_description = next_task
             callable_app = general_get_app_func(app_name)
             timestamp = experiment_func(callable_app, task_description)
             print(f"Received timestamp: {timestamp}")
-            write_timestamp_to_idx("tasks.csv", column_namer, empty_row_idx, timestamp)
+            write_timestamp_to_idx(TASK_CSV_PATH, column_namer, empty_row_idx, timestamp)
             time.sleep(2.0)
         time.sleep(30.0) # so that the data pulling can be done
         os.system("tmux kill-session -t " + default_data_collection_session_name)
@@ -514,14 +535,14 @@ try:
         column_namer = "mobile_agent_e_gpt_4o_1228_raw"
         experiment_func = do_an_mobile_agent_e_experiment
         while True:
-            next_task = load_not_done_task_pair(column_namer, "tasks.csv")
+            next_task = load_not_done_task_pair(column_namer, TASK_CSV_PATH)
             if next_task is None:
                 break
             empty_row_idx, app_name, task_description = next_task
             callable_app = general_get_app_func(app_name)
             timestamp = experiment_func(callable_app, task_description)
             print(f"Received timestamp: {timestamp}")
-            write_timestamp_to_idx("tasks.csv", column_namer, empty_row_idx, timestamp)
+            write_timestamp_to_idx(TASK_CSV_PATH, column_namer, empty_row_idx, timestamp)
             time.sleep(2.0)
         time.sleep(30.0) # so that the data pulling can be done
         os.system("tmux kill-session -t " + default_data_collection_session_name)
@@ -537,14 +558,14 @@ try:
         column_namer = "mobile_agent_e_claude_sonnet_3_7_raw"
         experiment_func = do_an_mobile_agent_e_experiment
         while True:
-            next_task = load_not_done_task_pair(column_namer, "tasks.csv")
+            next_task = load_not_done_task_pair(column_namer, TASK_CSV_PATH)
             if next_task is None:
                 break
             empty_row_idx, app_name, task_description = next_task
             callable_app = general_get_app_func(app_name)
             timestamp = experiment_func(callable_app, task_description)
             print(f"Received timestamp: {timestamp}")
-            write_timestamp_to_idx("tasks.csv", column_namer, empty_row_idx, timestamp)
+            write_timestamp_to_idx(TASK_CSV_PATH, column_namer, empty_row_idx, timestamp)
             time.sleep(2.0)
         time.sleep(30.0) # so that the data pulling can be done
         os.system("tmux kill-session -t " + default_data_collection_session_name)
@@ -557,14 +578,14 @@ try:
         column_namer = "cpm_gui_agent_humanity_rotate"
         experiment_func = do_a_cpm_gui_agent_experiment
         while True:
-            next_task = load_not_done_task_pair(column_namer, "tasks.csv")
+            next_task = load_not_done_task_pair(column_namer, TASK_CSV_PATH)
             if next_task is None:
                 break
             empty_row_idx, app_name, task_description = next_task
             callable_app = general_get_app_func(app_name)
             timestamp = experiment_func(callable_app, task_description)
             print(f"Received timestamp: {timestamp}")
-            write_timestamp_to_idx("tasks.csv", column_namer, empty_row_idx, timestamp)
+            write_timestamp_to_idx(TASK_CSV_PATH, column_namer, empty_row_idx, timestamp)
             time.sleep(2.0)
         time.sleep(30.0) # so that the data pulling can be done
         os.system("tmux kill-session -t " + default_data_collection_session_name)

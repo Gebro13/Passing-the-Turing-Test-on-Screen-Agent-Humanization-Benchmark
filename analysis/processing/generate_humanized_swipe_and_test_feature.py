@@ -1,12 +1,12 @@
 # (540, 960) -> (540, 192)
 
-from motionevent_classes import FingerEvent
-from feature_library import extract_features
-from draw_motion_event2 import throw_away_timestamp, plot_gestures
+from analysis.lib.motionevent_classes import FingerEvent
+from analysis.lib.feature_library import extract_features
+from analysis.plotting.draw_motion_event2 import throw_away_timestamp, plot_gestures
 import numpy as np
 from typing import List, Tuple
-from fit_effort_provider import extract_exact_swipe_batch, FitEffortProvider
-from gesture_log_reader_utils import filtered_gesture_generator_from_files_no_timestamp
+from analysis.processing.fit_effort_provider import extract_exact_swipe_batch, FitEffortProvider
+from analysis.lib.gesture_log_reader_utils import filtered_gesture_generator_from_files_no_timestamp
 from extract_feature_of_swipes import cleanse_into_swipe
 from pathlib import Path
 

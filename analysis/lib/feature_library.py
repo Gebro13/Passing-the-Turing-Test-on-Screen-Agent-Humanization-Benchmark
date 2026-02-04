@@ -6,7 +6,7 @@ from collections import defaultdict
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from typing import Any, List, Dict, Tuple, Union
-from motionevent_classes import FingerEvent
+from analysis.lib.motionevent_classes import FingerEvent
 
 # https://www.britannica.com/story/whats-the-difference-between-speed-and-velocity
 # speed is a scalar value while velocity is with a direction

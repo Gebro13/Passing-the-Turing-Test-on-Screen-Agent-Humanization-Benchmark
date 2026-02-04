@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, TypedDict
-from gesture_log_reader_utils import file_finder
-from draw_sensor_event import parse_as_df
+from analysis.lib.gesture_log_reader_utils import file_finder
+from analysis.plotting.draw_sensor_event import parse_as_df
 import pandas as pd
 
 try:

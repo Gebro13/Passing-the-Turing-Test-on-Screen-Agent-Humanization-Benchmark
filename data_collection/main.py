@@ -1,11 +1,24 @@
-import controller
+from pathlib import Path
+import sys
+
+this_path = Path(__file__).resolve()
+PROJ_FOLDER = this_path.parent.parent
+
+# assert the running folder is PROJ_FOLDER, otherwise throw error
+if Path.cwd() != PROJ_FOLDER:
+    raise NotImplementedError("Please run this script from the project root folder.")
+    print(f"Changing working directory from {Path.cwd()} to project folder {PROJ_FOLDER}")
+    os.chdir(PROJ_FOLDER)
+
+sys.path.insert(0, str(PROJ_FOLDER))
+
+import data_collection.controller as controller
 import argparse
 import os
 import time
-import automations
+import data_collection.automations as automations
 
 from datetime import datetime
-import pathlib
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Gesture and sensor data collection script.")
@@ -31,7 +44,7 @@ if __name__ == "__main__":
             exit(0)
         first_empty_row_idx, app_name, task_description = result
 
-    basepath = pathlib.Path("logs")
+    basepath = Path("logs")
     if not basepath.exists():
         basepath.mkdir(parents=True)
     absolute_base_path = basepath.resolve()
@@ -68,7 +81,6 @@ if __name__ == "__main__":
         controller.nullify_IMEevent_capturer()
 
     if args.automatic_exit_app_and_reset:
-        import automations
         automations.prepare_apps_screen()
 
     if can_log:

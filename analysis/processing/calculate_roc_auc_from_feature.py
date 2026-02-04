@@ -7,27 +7,24 @@ import numpy as np
 import pandas as pd
 import sklearn.preprocessing
 from sklearn.manifold import TSNE
-from sklearn.metrics import roc_auc_score, roc_curve, auc
 import matplotlib.pyplot as plt
 from typing import Callable, List, Dict, Optional, Tuple, TypedDict, Union, Set
 import numpy.typing as npt
 import argparse
-from motionevent_classes import FingerEvent
-from extract_feature_of_swipes import build_features_dataframe
+from analysis.lib.motionevent_classes import FingerEvent
+from analysis.processing.extract_feature_of_swipes import build_features_dataframe
 from sklearn.feature_selection import mutual_info_classif
 
 # compute svm and xgboost on the filtered data
 from sklearn.model_selection import train_test_split
 from sklearn.svm import SVC
 from xgboost import XGBClassifier
-from sklearn.metrics import roc_auc_score
+from sklearn.metrics import accuracy_score, roc_auc_score, roc_curve, auc, precision_recall_curve, average_precision_score
 import sklearn.pipeline
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import accuracy_score
 from copy import deepcopy
 import random
-from sklearn.metrics import precision_recall_curve
 
 # Paths and label configuration; the totality of input and output
 DATA_DIR = Path(__file__).resolve().parent
@@ -297,7 +294,6 @@ def compute_acc_per_feature_using_break_even_point(filtered_df: pd.DataFrame, po
         
         # plot sub by type as histogram to see the distribution
         if plot_plt:
-            import matplotlib.pyplot as plt
             plt.figure()
             for label in sub["type"].unique():
                 plt.hist(sub.loc[sub["type"] == label, feat], bins=30, alpha=0.5, label=str(label))
@@ -326,7 +322,6 @@ def compute_acc_per_feature_using_break_even_point(filtered_df: pd.DataFrame, po
 
                 if plot_plt:
                     # plot the precision-recall curve and find the break-even point
-                    import matplotlib.pyplot as plt
                     # create new figure
                     plt.figure()
                     # plt.plot(recalls, precisions)
@@ -379,7 +374,6 @@ def compute_acc_per_feature_using_break_even_point(filtered_df: pd.DataFrame, po
             print(f"Feature {feat} has best accuracy {best_acc} at break-even point.")
             if plot_plt:
                 # plot the precision-recall curve and find the break-even point
-                import matplotlib.pyplot as plt
                 # create new figure
                 plt.figure()
                 # plt.plot(recalls, precisions)
@@ -390,7 +384,6 @@ def compute_acc_per_feature_using_break_even_point(filtered_df: pd.DataFrame, po
                 plt.title(f"Precision-Recall Curve for feature {feat} with pos_label {pos_label} and neg_label {neg_label}")
 
 
-                import matplotlib.pyplot as plt
                 plt.figure()
                 for label in sub["type"].unique():
                     plt.hist(sub.loc[sub["type"] == label, feat], bins=30, alpha=0.5, label=str(label))
@@ -483,7 +476,6 @@ def compute_average_precision_per_feature(filtered_df: pd.DataFrame, pos_label: 
         automatically drops nan values.
         Returns a dataframe with columns: feature, ap, n, n_pos, n_neg
     """
-    from sklearn.metrics import average_precision_score
 
     features: List[str] = get_numeric_feature_column_names(filtered_df)
     filtered_df = filter_df(df=filtered_df, pos_label=pos_label, neg_label=neg_label)
