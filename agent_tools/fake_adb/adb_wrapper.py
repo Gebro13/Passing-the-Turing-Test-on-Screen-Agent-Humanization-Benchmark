@@ -12,6 +12,7 @@ import sys
 import os
 import numpy as np
 from pathlib import Path
+import base64
 
 # Try to import fcntl — if it fails, platform doesn't support it
 try:
@@ -90,11 +91,22 @@ def get_current_phone_timestamp() -> str:
         return "0.0"
     return result.stdout.strip()
 
+def raw_log_str(str1: str):
+    os.system(f"printf \"{str1}\" >> \"$(cat {IME_EVENT_PATH_STR})\"")
+
 def log_char(char_or_str: str) -> None:
     # We use os.system here to match controller.py's behavior exactly
     # replace " and ' in char_or_str to avoid shell issues
     char_or_str = char_or_str.replace('"', '\\"').replace("'", "\\'")
-    os.system(f"printf \"{get_current_phone_timestamp()} \\`{char_or_str}\\`\n\" >> \"$(cat {IME_EVENT_PATH_STR})\"")
+    raw_log_str(f"{get_current_phone_timestamp()} \\`{char_or_str}\\`\n")
+
+def log_base64_encoded_and_decoded_str(base64_str: str) -> None:
+    decoded_bytes = base64.b64decode(base64_str)
+    decoded_str = decoded_bytes.decode('utf-8')
+    raw_log_str(f"{get_current_phone_timestamp()} B64: \\`{base64_str}\\` Decoded: \\`{decoded_str}\\`\n")
+
+def log_special_key(key_name: str) -> None:
+    raw_log_str(f"{get_current_phone_timestamp()} <{key_name}>\n")
 
 class MotionGenerator:
     static_fit_effort_provider: Optional[FitEffortProvider] = None
@@ -605,6 +617,27 @@ def main():
 
         text = text_restore(text)
         do_type(adb_path, text, use_adb_keyboard_for_all_keys=True)
+
+    elif len(args) == 8 and args[0:7] == ["shell", "am", "broadcast", "-a", "ADB_INPUT_B64", "--es", "msg"]:
+        if GLOBAL_FAKE_HUMAN:
+            b64_text = args[7]
+            decoded_bytes = base64.b64decode(b64_text)
+            text = decoded_bytes.decode('utf-8')
+            do_type(adb_path, text, use_adb_keyboard_for_all_keys=True)
+        else:
+            log_base64_encoded_and_decoded_str(args[7])
+            sys.exit(run_real_adb(adb_path_list, args))
+
+    elif args == ["shell", "am", "broadcast", "-a", "ADB_CLEAR_TEXT"]:
+        if GLOBAL_FAKE_HUMAN:
+            # clear text by sending multiple backspaces
+            # here we assume a maximum of 100 characters to be cleared
+            raise NotImplementedError("What backspace does to text boxes await further investigation and imitation.")
+            for _ in range(100):
+                do_type(adb_path, '\b', use_adb_keyboard_for_all_keys=True)
+        else:
+            log_special_key("ADB_CLEAR_TEXT")
+            sys.exit(run_real_adb(adb_path_list, args))
     else:
         time.sleep(2.0) # slight delay to wait for random clicks to settle
         sys.exit(run_real_adb(adb_path_list, args))

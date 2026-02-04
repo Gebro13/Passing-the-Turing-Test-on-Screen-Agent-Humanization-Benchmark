@@ -69,6 +69,8 @@ if __name__ == "__main__":
             automations.switch_app_from_sensorevent_to_appscreen()
 
     try:
+        with open(automations.TIMESTAMP_RECORDER, "w") as f:
+            f.write(timestamp + "\n")
         input(f"Press Enter to stop recording...   {timestamp}")
     except KeyboardInterrupt:
         pass
