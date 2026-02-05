@@ -1,0 +1,27 @@
+diff --git a/node_modules/@ui-tars/operator-adb/dist/index.js b/node_modules/@ui-tars/operator-adb/dist/index.js
+index c684475..14a4da8 100644
+--- a/node_modules/@ui-tars/operator-adb/dist/index.js
++++ b/node_modules/@ui-tars/operator-adb/dist/index.js
+@@ -166,18 +166,18 @@ class AdbOperator extends core_namespaceObject.Operator {
+                     switch(direction){
+                         case 'up':
+                             endX = startX;
+-                            endY = startY - 100;
++                            endY = startY + 100;
+                             break;
+                         case 'down':
+                             endX = startX;
+-                            endY = startY + 100;
++                            endY = startY - 100;
+                             break;
+                         case 'left':
+-                            endX = startX - 100;
++                            endX = startX + 100;
+                             endY = startY;
+                             break;
+                         case 'right':
+-                            endX = startX + 100;
++                            endX = startX - 100;
+                             endY = startY;
+                             break;
+                     }

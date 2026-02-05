@@ -1,0 +1,13 @@
+diff --git a/node_modules/@ui-tars/operator-adb/dist/index.js b/node_modules/@ui-tars/operator-adb/dist/index.js
+index c684475..bd9afaf 100644
+--- a/node_modules/@ui-tars/operator-adb/dist/index.js
++++ b/node_modules/@ui-tars/operator-adb/dist/index.js
+@@ -145,6 +145,8 @@ class AdbOperator extends core_namespaceObject.Operator {
+                         const escapedContent = content.replace(/(['"\\])/g, '\\$1');
+                         const cmd = this.androidDevUseAdbIME ? `adb -s ${this.deviceId} shell am broadcast -a ADB_INPUT_TEXT --es msg "${escapedContent}"` : `adb -s ${this.deviceId} shell input text "${escapedContent}"`;
+                         await commandWithTimeout(cmd);
++                        const delayMs = Math.max(escapedContent.length * 900, 1000);
++                        await new Promise(resolve => setTimeout(resolve, delayMs)); // wait for typing to finish
+                     }
+                     break;
+                 case 'swipe':
