@@ -13,6 +13,10 @@
     "cpm_gui_agent": {
         "dir": "/path/to/cpm_gui_agent",
         "conda_env": "cpm_gui_agent_env"
+    },
+    "open_autoglm": {
+        "dir": "/path/to/open_autoglm",
+        "conda_env": "open_autoglm_env"
     }
 }
 

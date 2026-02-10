@@ -14,5 +14,11 @@ No eminent patches relevant to our data collection or bugfix is needed after set
 
 ## OpenAutoGLM
 
-No eminent patches relevant to our data collection or bugfix is needed after setting up https://github.com/zai-org/Open-AutoGLM.
+No eminent patches relevant to our data collection or bugfix is needed after setting up https://github.com/zai-org/Open-AutoGLM, other than putting a `environment_variables.sh` file in the root directory of the repo with the following content:
+
+```bash
+export BASE_URL=https://open.bigmodel.cn/api/paas/v4
+export MODEL_NAME=autoglm-phone
+export API_KEY=GET_YOUR_OWN_KEY_FROM_https://bigmodel.cn/usercenter/proj-mgmt/apikeys
+```
 
