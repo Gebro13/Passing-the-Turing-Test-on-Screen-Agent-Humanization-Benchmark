@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 import time
 import subprocess
 from PIL import Image
@@ -48,22 +49,27 @@ def get_current_phone_timestamp() -> str:
         raise RuntimeError(f"Error: Failed to get current phone timestamp. {result.stderr}")
     return result.stdout.strip()
 
-IME_EVENT_PATH_STR: str = "~/IME_EVENT_PATH.txt"
+COLLECTION_FOLDER_ABSOLUTE: Path = Path(__file__).resolve().parent
+PROJ_FOLDER_ABSOLUTE: Path = COLLECTION_FOLDER_ABSOLUTE.parent
+FAKE_ADB_PATH_ABSOLUTE: Path = PROJ_FOLDER_ABSOLUTE / "agent_tools" / "fake_adb"
+BIN_IME_PATH: Path = FAKE_ADB_PATH_ABSOLUTE / "ime_bin_event_capturer.txt"
+
+IME_EVENT_PATH_STORAGE =  PROJ_FOLDER_ABSOLUTE / "IME_EVENT_PATH.txt"
 
 def setup_IMEevent_capturer(absolute_IME_path: str) -> None:
     """
         Inject the path as a file that can be read by other running scripts.
     """
-    command = f"echo {absolute_IME_path} > {IME_EVENT_PATH_STR}"
-    os.system(command=command)
+    with open(IME_EVENT_PATH_STORAGE, "w") as f:
+        f.write(absolute_IME_path + "\n")
     print("IME event capturer set up successfully.")
 
-def nullify_IMEevent_capturer(bin_IME_path: str = "~/ime_bin_event_capturer.txt") -> None:
+def nullify_IMEevent_capturer(bin_IME_path: Path = BIN_IME_PATH) -> None:
     """
         Nullify the IME event capturer by redirecting to global bin.
     """
-    command = f"echo {bin_IME_path} > {IME_EVENT_PATH_STR}"
-    os.system(command=command)
+    with open(IME_EVENT_PATH_STORAGE, "w") as f:
+        f.write(str(bin_IME_path) + "\n")
 
 
 def terminate_process_gracefully(proc: subprocess.Popen):

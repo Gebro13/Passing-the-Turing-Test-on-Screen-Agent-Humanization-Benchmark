@@ -20,7 +20,33 @@ import data_collection.automations as automations
 
 from datetime import datetime
 
+def assert_equal_paths():
+    """
+    Make sure that the path in controller, automations, and main are all the same.
+    """
+    assert controller.COLLECTION_FOLDER_ABSOLUTE == automations.COLLECTION_FOLDER_ABSOLUTE, \
+        "Collection folder paths in controller and automations do not match."
+    assert controller.PROJ_FOLDER_ABSOLUTE == automations.PROJ_FOLDER_ABSOLUTE, \
+        "Project folder paths in controller and automations do not match."
+    assert controller.FAKE_ADB_PATH_ABSOLUTE == automations.FAKE_ADB_PATH_ABSOLUTE, \
+        "Fake ADB paths in controller and automations do not match."
+    assert PROJ_FOLDER == controller.PROJ_FOLDER_ABSOLUTE, \
+        "Project folder path in main does not match that in controller."
+
+    
+    import agent_tools.fake_adb.adb_wrapper as adb_wrapper # only used for assertions.
+
+    assert controller.PROJ_FOLDER_ABSOLUTE == adb_wrapper.PROJ_FOLDER, \
+        "Project folder path in controller does not match that in adb_wrapper."
+    assert controller.BIN_IME_PATH == adb_wrapper.BIN_IME_PATH, \
+        "BIN_IME_PATH in controller does not match that in adb_wrapper."
+    assert controller.IME_EVENT_PATH_STORAGE == adb_wrapper.IME_EVENT_PATH_STORAGE, \
+        "IME_EVENT_PATH_STORAGE in controller does not match that in adb_wrapper."
+
+
 if __name__ == "__main__":
+    assert_equal_paths()
+
     parser = argparse.ArgumentParser(description="Gesture and sensor data collection script.")
     parser.add_argument("--only_adb_getevent", dest="only_adb_getevent", action="store_true", default=False,
                         help="If set, only runs the adb getevent command without starting gesture recording.")

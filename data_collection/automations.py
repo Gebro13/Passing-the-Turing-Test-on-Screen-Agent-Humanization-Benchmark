@@ -28,6 +28,10 @@ if Path.cwd() != PROJ_FOLDER_ABSOLUTE:
 with open(COLLECTION_FOLDER_ABSOLUTE / "automations_agents.json", "r") as f:
     automations_agents_config = json.load(f)
 
+# if COLLECTION_FOLDER_ABSOLUTE / "temp" does not exist, create it
+if not os.path.exists(COLLECTION_FOLDER_ABSOLUTE / "temp"):
+    os.makedirs(COLLECTION_FOLDER_ABSOLUTE / "temp")
+
 USER_NAME = os.getenv("USER")
 MACHINE_NAME = os.uname().nodename
 recorder_env = automations_agents_config["recorder"]["conda_env"]
@@ -157,7 +161,7 @@ stop_event = threading.Event()
 resume_event = threading.Event()
 
 
-def run_useless_action_loop_method_2(mean_interval: float = 1.1):
+def run_useless_action_loop_method_2(mean_interval_seconds: float = 1.1):
     """
     Perform useless micro-swipes at random intervals.
 
@@ -166,7 +170,7 @@ def run_useless_action_loop_method_2(mean_interval: float = 1.1):
     """
     print("Starting useless action loop method 2...")
     while not stop_event.is_set():
-        sleep_time = poisson_interval(mean_interval)
+        sleep_time = poisson_interval(mean_interval_seconds)
         time.sleep(sleep_time)
         resume_event.wait()  # Wait until resumed
 

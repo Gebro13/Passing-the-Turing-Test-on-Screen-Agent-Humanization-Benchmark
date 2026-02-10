@@ -5,7 +5,7 @@ import os
 import time
 import random
 import pickle
-from typing import List, Optional
+from typing import List, Optional, Tuple
 import shlex
 import datetime
 import sys
@@ -24,12 +24,17 @@ except ImportError:
     )
 
 # Ensure the current directory is in python path to import local modules
-proj_folder = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+SELF_FOLDER = Path(__file__).resolve().parent
+PROJ_FOLDER = SELF_FOLDER.parent.parent
+assert PROJ_FOLDER / "agent_tools" / "fake_adb" == SELF_FOLDER, "The script's location has changed, please update the path handling code accordingly."
+
 
 
 try:
     
-    sys.path.append(proj_folder) # very necessary since we may call this file from other directories
+    sys.path.append(str(PROJ_FOLDER)) # very necessary since we may call this file from other directories
     from analysis.lib.motionevent_classes import GotEvent, FingerEvent
     from analysis.processing.fit_effort_provider import FitEffortProvider, bot_line_fit
 except ImportError as e:
@@ -41,7 +46,15 @@ REAL_ADB = str(Path.home() / "Android" / "Sdk" / "platform-tools" / "adb")
 GLOBAL_TOUCH_DEVICE = "/dev/input/event4"
 GLOBAL_EVENT_INTERVAL_US = 11000
 GLOBAL_FAKE_HUMAN = False
-IME_EVENT_PATH_STR = "~/IME_EVENT_PATH.txt"
+IME_EVENT_PATH_STORAGE =  PROJ_FOLDER / "IME_EVENT_PATH.txt"
+BIN_IME_PATH = SELF_FOLDER / "ime_bin_event_capturer.txt"
+
+try:
+    with open(IME_EVENT_PATH_STORAGE, "r") as f:
+        IME_EVENT_PATH_RECORD = Path(f.read().strip())
+except FileNotFoundError:
+    print(f"IME event path record file not found: {IME_EVENT_PATH_STORAGE}. We output recorded IME EVENT PATH to default storage.", file=sys.stderr)
+    IME_EVENT_PATH_RECORD = SELF_FOLDER / "ime_bin_event_capturer.txt"
 
 # Constants from controller.py
 EV_SYN             = 0
@@ -92,7 +105,8 @@ def get_current_phone_timestamp() -> str:
     return result.stdout.strip()
 
 def raw_log_str(str1: str):
-    os.system(f"printf \"{str1}\" >> \"$(cat {IME_EVENT_PATH_STR})\"")
+    with open(IME_EVENT_PATH_RECORD, "a") as f:
+        f.write(str1)
 
 def log_char(char_or_str: str) -> None:
     # We use os.system here to match controller.py's behavior exactly
@@ -115,7 +129,7 @@ class MotionGenerator:
     def init_provider():
         if MotionGenerator.static_fit_effort_provider is None:
             try:
-                pkl_path = os.path.join(proj_folder, "analysis", "processing", "swipe_data.pkl")
+                pkl_path = PROJ_FOLDER / "analysis" / "processing" / "swipe_data.pkl"
                 with open(pkl_path, "rb") as f:
                     pickled: List[List[FingerEvent]] = pickle.load(f)
                     MotionGenerator.static_fit_effort_provider = FitEffortProvider(pickled)
@@ -336,15 +350,15 @@ class MotionGenerator:
         trace_gotevent = MotionGenerator.swipe_to_event_trace(trace=fake_action_trace, end_upfinger_time_us=12000, evdev=evdev, fake_pressure=False)
         MotionGenerator.flush_event_sequence(adb_path, evdev, trace_gotevent)
 
-    tap_position_record_file = str(Path(proj_folder) / "fake_adb" / "tap_position_record.txt") # PASTBUG: was relative path, causing issues when running from other directories e.g. mobile-agent-e
+    tap_position_record_file = SELF_FOLDER / "tap_position_record.txt" # PASTBUG: was relative path, causing issues when running from other directories e.g. mobile-agent-e
+    
     @staticmethod
     def record_tap_position(x, y):
         with open(MotionGenerator.tap_position_record_file, "w") as f:
-
             f.write(f"{x},{y}\n")
     
     @staticmethod
-    def read_tap_positions() -> List[tuple]:
+    def read_tap_positions() -> Tuple[int, int]:
         positions = []
         try:
             with open(MotionGenerator.tap_position_record_file, "r") as f:
@@ -352,8 +366,10 @@ class MotionGenerator:
                     x_str, y_str = line.strip().split(",")
                     positions.append((int(x_str), int(y_str)))
         except FileNotFoundError:
-            pass
-        return positions
+            print(f"Tap position record file not found: {MotionGenerator.tap_position_record_file}. We write (0,0)", file=sys.stderr)
+            positions.append((0, 0))
+        assert len(positions) == 1, f"Expected exactly one tap position in the record file, but got {len(positions)}. File content: {positions}"
+        return positions[0]
 
     @staticmethod
     def custom_fake_action_3(adb_path, width = 1080, height=1920, evdev=GLOBAL_TOUCH_DEVICE):
@@ -370,7 +386,7 @@ class MotionGenerator:
         radius = 50
         # center_x = random.randint(width//4 + radius, 3*width//4 - radius)
         # center_y = random.randint(height//4 + radius, 3*height//4 - radius)
-        center_x, center_y = MotionGenerator.read_tap_positions()[-1]
+        center_x, center_y = MotionGenerator.read_tap_positions()
 
         fake_action_trace: List[FingerEvent] = []
         num_points = 36
@@ -643,7 +659,7 @@ def main():
         sys.exit(run_real_adb(adb_path_list, args))
 
 
-LOCK_FILE = str(Path(proj_folder) / "agent_tools" / "fake_adb" / "adb_wrapper.lock")
+LOCK_FILE = str(SELF_FOLDER / "adb_wrapper.lock")
 
 if __name__ == "__main__":
     # Open lock file
