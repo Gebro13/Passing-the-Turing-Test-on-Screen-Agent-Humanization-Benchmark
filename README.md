@@ -144,7 +144,7 @@ no need to launch the individual collectors.
 
 Collecting human data:
 ```bash
-python main.py --automatic_exit_app_and_reset --automatic_switch_app --user <user_name_just_specify_in_the_csv> --task_provide_file tasks.csv
+python data_collection/main.py --automatic_exit_app_and_reset --automatic_switch_app --user <user_name_just_add_to_the_csv_columns> --task_provide_file tasks.csv --automatically_prepare_provided_task_app
 ```
 Press enter to stop, don't press ctrl+c.
 

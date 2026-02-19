@@ -1,5 +1,6 @@
 from pathlib import Path
 import sys
+import threading
 
 this_path = Path(__file__).resolve()
 PROJ_FOLDER = this_path.parent.parent
@@ -59,6 +60,8 @@ if __name__ == "__main__":
                         help="Specify the current user for data organization.")
     parser.add_argument("--task_provide_file", type=str, default=None,
                         help="CSV file that provides the list of tasks to be performed.")
+    parser.add_argument("--automatically_prepare_provided_task_app", dest="automatically_prepare_provided_task_app", action="store_true", default=False,
+                        help="If set, automatically prepare the app specified in the provided task file before recording. Require that the current screen is the app screen, and the task file is provided and has pending tasks for the user.")
     args = parser.parse_args()
 
     # if task_provide_file is given, read the file, find the user name column, find the first empty block, and print the app_name and app_description column of the row
@@ -68,7 +71,18 @@ if __name__ == "__main__":
         if result is None:
             print(f"All tasks for user {args.user} are already completed.")
             exit(0)
-        first_empty_row_idx, app_name, task_description = result
+        first_empty_row_idx, callable_app_name, task_description = result
+
+        if args.automatically_prepare_provided_task_app:
+            # call automations.open_app_by_name with the callable_app_name
+            callable_app = automations.specific.get_app_general_launcher(callable_app_name) # need to use a launcher without later overhead so as not to interfere with sensorevent switching.
+            # calls the originally synchronous callable app function in a non-blocking way, so that the app can be opened while the recording is going.
+            threading.Thread(target=callable_app, daemon=True).start()
+            time.sleep(1.0) # wait for a while to let the app open, otherwise the recording might miss the app opening event and cause misalignment between the recorded events and the actual screen state.
+    else:
+        if args.automatically_prepare_provided_task_app:
+            raise ValueError("To automatically prepare the provided task app, you need to provide both --task_provide_file and --user arguments.")
+
 
     basepath = Path("logs")
     if not basepath.exists():

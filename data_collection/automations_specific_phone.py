@@ -143,12 +143,23 @@ def general_run_app(app_name: str):
         time.sleep(15.0)
 """
 
+def get_app_general_launcher(app_name: str) -> Callable[[], None]:
+    """
+        Naive click and wait.  
+        No constant overhead before clicking the app icon.
+    """
+    def func():
+        pos = query_position(app_name)
+        general.tap(*pos)
+        time.sleep(15.0)
+    return func
+
+
 def general_get_app_func(app_name: str) -> Callable[[], None]:
+    """
+        If the app has a specifically defined function, return that function, which may have some specific preparations for that app. Otherwise, return a general launcher function that just taps on the app icon and waits.
+    """
     if app_name in globals():
         return globals()[app_name]
     else:
-        def func():
-            pos = query_position(app_name)
-            general.tap(*pos)
-            time.sleep(15.0)
-        return func
+        return get_app_general_launcher(app_name)
