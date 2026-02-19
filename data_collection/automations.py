@@ -635,8 +635,9 @@ with open(COLLECTION_FOLDER_ABSOLUTE / "app_name_translations.json", "r") as f:
 
 def load_not_done_task_pair(attendee_name: str, task_file_path: Path) -> Optional[Tuple[int, str, str]]:
     """
-        if return none, no pending tasks for this attendee
-        returns: first_empty_row_idx, app_name, task_description
+        if return none, no pending tasks for this attendee.  
+        prints: the next task for the user, including app name and task description originally in the task csv.  
+        returns: first_empty_row_idx, callable_app_name, task_description
     """
     df = pd.read_csv(task_file_path, header=0, dtype=str)
     
@@ -649,11 +650,14 @@ def load_not_done_task_pair(attendee_name: str, task_file_path: Path) -> Optiona
     if not empty_row_idx.empty:
         first_empty_row_idx = empty_row_idx[0]
         first_empty_row = df.iloc[first_empty_row_idx]
-        translated_app_name = translations[first_empty_row[app_name_col]]
+        task_file_app_name = first_empty_row[app_name_col]
+        task_file_app_description = first_empty_row[app_description_col]
+
+        callable_app_name = translations[task_file_app_name]
         print(f"Next task for user {attendee_name}:")
-        print(f"App Name: {first_empty_row[app_name_col]}")
-        print(f"App Description: {first_empty_row[app_description_col]}")
-        return (first_empty_row_idx, translated_app_name, first_empty_row[app_description_col])
+        print(f"App Name: {task_file_app_name}")
+        print(f"App Description: {task_file_app_description}")
+        return (first_empty_row_idx, callable_app_name, task_file_app_description)
     else:
         print(f"No pending tasks found for user {attendee_name}.")
         return None
