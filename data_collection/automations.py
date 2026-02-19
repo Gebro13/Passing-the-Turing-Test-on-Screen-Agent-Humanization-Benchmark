@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 from typing import Dict, List, Optional, Tuple, Callable, TypedDict
 import datetime
@@ -14,7 +15,6 @@ import pandas as pd
 
 
 
-
 COLLECTION_FOLDER_ABSOLUTE: Path = Path(__file__).resolve().parent
 PROJ_FOLDER_ABSOLUTE: Path = COLLECTION_FOLDER_ABSOLUTE.parent
 FAKE_ADB_PATH_ABSOLUTE: Path = PROJ_FOLDER_ABSOLUTE / "agent_tools" / "fake_adb"
@@ -24,6 +24,13 @@ if Path.cwd() != PROJ_FOLDER_ABSOLUTE:
     raise NotImplementedError("Please run this script from the project root folder.")
     print(f"Changing working directory from {Path.cwd()} to project folder {PROJ_FOLDER_ABSOLUTE}")
     os.chdir(PROJ_FOLDER_ABSOLUTE)
+
+if len(sys.path) == 0 or sys.path[0] != str(PROJ_FOLDER_ABSOLUTE):
+    sys.path.insert(0, str(PROJ_FOLDER_ABSOLUTE))
+
+import data_collection.automations_general_android as general
+import data_collection.automations_specific_phone as specific
+
 
 with open(COLLECTION_FOLDER_ABSOLUTE / "automations_agents.json", "r") as f:
     automations_agents_config = json.load(f)
@@ -36,122 +43,9 @@ USER_NAME = os.getenv("USER")
 MACHINE_NAME = os.uname().nodename
 recorder_env = automations_agents_config["recorder"]["conda_env"]
 
+# image_save_path_folder = COLLECTION_FOLDER_ABSOLUTE / "screenshot"
+# image_save_path = image_save_path_folder / "screenshot.png"
 
-def fast_screenshot(adb_path: str = "adb") -> PIL.Image.Image:
-    image_save_path_folder = COLLECTION_FOLDER_ABSOLUTE / "screenshot"
-    image_save_path = image_save_path_folder / "screenshot.png"
-    
-    if True:
-        command = adb_path + " shell rm /sdcard/screenshot.png"
-        os.system(command)
-        command = adb_path + " shell screencap -p /sdcard/screenshot.png"
-        os.system(command)
-        
-        # if ./screenshot is not existent, then create the directory
-        if not os.path.exists(image_save_path_folder):
-            os.makedirs(image_save_path_folder)
-
-        command = adb_path + f" pull /sdcard/screenshot.png {image_save_path}"
-        os.system(command)
-    else:
-        pass
-    image = PIL.Image.open(image_save_path)
-    # resize image to 1080x1920
-    image = image.resize((1080, 1920))
-    return image
-
-def get_rgb(image: PIL.Image.Image, x: int, y: int) -> Tuple[int, int, int]:
-    pixel = image.getpixel((x, y))
-    if pixel is None:
-        raise ValueError("Pixel at the given coordinates is None")
-    elif isinstance(pixel, int):
-        return (pixel, pixel, pixel)
-    elif isinstance(pixel, float):
-        raise NotImplementedError("Float pixel value is not supported or not tested. What does this mean anyway.")
-        val = int(pixel)
-        return (val, val, val)
-    elif len(pixel) == 4:
-        return pixel[:3]
-    elif len(pixel) == 3:
-        return pixel
-    else:
-        raise ValueError("Unsupported pixel format")
-
-def get_screenshot_and_get_rgb(x: int, y: int) -> Tuple[int, int, int]:
-    image = fast_screenshot()
-    return get_rgb(image, x, y)
-
-def l1_distance(c1: Tuple[int, int, int], c2: Tuple[int, int, int]) -> int:
-    return sum(abs(c1[i] - c2[i]) for i in range(3))
-
-def pixel_on_screenshot_is_color(x: int, y: int, target_color: Tuple[int, int, int], l1_distance_threshold: int) -> bool:
-    current_color = get_screenshot_and_get_rgb(x, y)
-    distance = l1_distance(current_color, target_color)
-    return distance <= l1_distance_threshold
-
-def tap(x: int, y: int):
-    os.system(f"adb shell input tap {x} {y}")
-
-password: List[Tuple[int, int]] = [
-
-]
-
-def swipe(x1: int, y1: int, x2: int, y2: int, duration_ms: int = 300):
-    os.system(f"adb shell input swipe {x1} {y1} {x2} {y2} {duration_ms}")
-
-def power():
-    os.system("adb shell input keyevent 26")
-
-def start_phone():
-    # power()
-    swipe(540, 1800, 540, 700, duration_ms=200)
-    for x, y in password:
-        tap(x, y)
-        time.sleep(0.1)
-
-def app_switch():
-    os.system("adb shell input keyevent KEYCODE_APP_SWITCH")
-
-def home():
-    os.system("adb shell input keyevent KEYCODE_HOME")
-
-def clean_every_app(final_wait_seconds: float = 4.0):
-    """
-    start: anywhere anystate  
-    end: home screen with no app in background  
-    """
-    for _ in range(10):
-        home()
-        time.sleep(0.1)
-    app_switch()
-    time.sleep(0.3)
-    tap(540, 1800)
-    time.sleep(final_wait_seconds)
-
-def prepare_apps_screen():
-    """
-    start: anywhere anystate  
-    end: app screen with no app in background  
-    """
-    clean_every_app()
-    # for i in range(3): # no need now because app screen is set to top 
-    #     swipe(900, 1100, 100, 1100, duration_ms=300)
-    # time.sleep(0.1)
-
-def switch_app_from_sensorevent_to_appscreen():
-    """
-    
-    start: sensor event app in foreground
-    end: app screen in foreground, May Not Be Fully Loaded; it depends on the app.
-    """
-    time.sleep(1.0)
-    app_switch()
-    time.sleep(1.0)
-    tap(850, 1300)
-    time.sleep(1.0)
-
-def back():
-    os.system("adb shell input keyevent KEYCODE_BACK")
 
 
 def poisson_interval(mean_seconds: float = 1.1) -> float:
@@ -178,107 +72,6 @@ def run_useless_action_loop_method_2(mean_interval_seconds: float = 1.1):
         fake_adb_py_path = FAKE_ADB_PATH_ABSOLUTE / "adb_wrapper.py"
 
         os.system(f"python {fake_adb_py_path} shell input fake custom_fake_action_3 2> /dev/null")
-
-
-x_coords = [160, 420, 680, 940]
-y_coords = [150,
-            390,
-            630,
-            870,
-            1110, 
-            1350]
-
-table_of_app_funcs = [
-["",        "zhihu",   "voov",     "qqmusic"],
-["tdocs",   "taobao",  "qunar",    "jd"     ],
-["",        "",        "iqiyi",    "ctrip"  ],
-["eleme",   "meituan", "bilibili", "rednote"],
-["gaode",   "haodf",   "toutiao",  "youdao"],
-["cainiao", "weibo",   "dianping", "umetrip"]
-]
-
-def query_position(app_func_name: str) -> Tuple[int, int]:
-    for (i, row) in enumerate(table_of_app_funcs):
-        for (j, func_name) in enumerate(row):
-            if func_name == app_func_name:
-                return (x_coords[j], y_coords[i])
-    raise ValueError(f"App function name {app_func_name} not found in table.")
-
-def jd():
-    tap(916, 373)
-    time.sleep(7.0)
-    tap(665, 243)
-
-def ctrip():
-    tap(898, 646)
-    time.sleep(7.0)
-
-def ctrip_disturbance_resolution():
-    if not pixel_on_screenshot_is_color(540, 45, (37, 130, 245), 10):
-        swipe(540, 266, 540, 1412, duration_ms=2000)
-
-def eleme():
-    tap(132, 843) # open eleme
-    time.sleep(7.0)
-    tap(210, 927) # select sjtu as the place
-    time.sleep(1.0)
-
-def eleme_cleanup():
-    prepare_apps_screen()
-    eleme()
-    tap(754, 1872) # click for the cart
-    time.sleep(0.5)
-    while True:
-        if pixel_on_screenshot_is_color(720, 650, (214,229,231), 10):
-            # 720, 650 # place for a gray-blue shadow
-            # 470, 1223 # place for a very special blue icon
-            break
-        bin_coordinates = (991, 402)
-        if pixel_on_screenshot_is_color(*bin_coordinates, (254, 246, 223), 10):
-            print("The bin icon is not in the expected place.")
-            bin_coordinates = (991, 524) # try a lower place
-        tap(*bin_coordinates) # click delete for the first shop
-        time.sleep(0.2)
-        tap(709, 1090) # confirm delete
-        time.sleep(1.0)
-
-def qqmusic():
-    tap(910, 156)
-    time.sleep(15.0)
-
-def iqiyi():
-    tap(682, 626)
-    time.sleep(7.0)
-
-def tdocs():
-    tap(160, 390)
-    time.sleep(10.0)
-    tap(860, 1530)
-    time.sleep(1.0)
-    tap(860, 1530)
-    time.sleep(1.0)
-
-"""
-def general_run_app(app_name: str):
-    # first check whether app_name is defined in global space; if not, query its position
-    if app_name in globals():
-        globals()[app_name]()
-    else:
-        pos = query_position(app_name)
-        print(f"General run app: tapping at position {pos} for app {app_name}")
-        tap(*pos)
-        time.sleep(15.0)
-"""
-
-def general_get_app_func(app_name: str) -> Callable[[], None]:
-    if app_name in globals():
-        return globals()[app_name]
-    else:
-        def func():
-            pos = query_position(app_name)
-            tap(*pos)
-            time.sleep(15.0)
-        return func
 
 
 
@@ -370,7 +163,7 @@ def do_an_ui_tars_experiment(callable_app_launch: Callable[[], None], experiment
         callable_app_launch: a function that launches the app to be tested; it require phone showing app screen. It clicks open the app and configure it until ready to serve.
     """
     resume_event.clear()
-    prepare_apps_screen()
+    specific.prepare_apps_screen()
     callable_app_launch()
     start_another_data_collection(default_data_collection_session_name)
     time.sleep(8.0)
@@ -388,7 +181,7 @@ def do_an_ui_tars_experiment(callable_app_launch: Callable[[], None], experiment
 
 def do_an_mobile_agent_e_experiment(callable_app_launch: Callable[[], None], experiment_name: str, timeout_seconds: int = 1800):
     resume_event.clear()
-    prepare_apps_screen()
+    specific.prepare_apps_screen()
     callable_app_launch()
     start_another_data_collection(default_data_collection_session_name)
     os.system(f"echo 'launched mobile-agent-e experiment on date ' $(date) >> experiment_log.txt")
@@ -435,7 +228,7 @@ def check_if_cpm_gui_agent_session_is_idle(tmux_session_name: str) -> bool:
     return False
 
 def do_a_cpm_gui_agent_experiment(callable_app_launch: Callable[[], None], experiment_name: str, timeout_seconds: int = 1800):
-    prepare_apps_screen()
+    specific.prepare_apps_screen()
     callable_app_launch()
     start_another_data_collection(default_data_collection_session_name)
     os.system(f"echo 'launched cpm-gui-agent experiment on date ' $(date) >> experiment_log.txt")
@@ -557,7 +350,7 @@ class AgentLauncher(ABC):
         """
         resume_event.clear()  # halt fake action generation
         
-        prepare_apps_screen()
+        specific.prepare_apps_screen()
         callable_app_launch()
         start_another_data_collection(default_data_collection_session_name)
         time.sleep(20.0)
@@ -700,7 +493,7 @@ try:
             if next_task is None:
                 break
             empty_row_idx, app_name, task_description = next_task
-            callable_app = general_get_app_func(app_name)
+            callable_app = specific.general_get_app_func(app_name)
             timestamp = experiment_func(callable_app, task_description)
             print(f"Received timestamp: {timestamp}")
             write_timestamp_to_idx(TASK_CSV_PATH, column_namer, empty_row_idx, timestamp)
@@ -725,7 +518,7 @@ try:
             if next_task is None:
                 break
             empty_row_idx, app_name, task_description = next_task
-            callable_app = general_get_app_func(app_name)
+            callable_app = specific.general_get_app_func(app_name)
             timestamp = experiment_func(callable_app, task_description)
             print(f"Received timestamp: {timestamp}")
             write_timestamp_to_idx(TASK_CSV_PATH, column_namer, empty_row_idx, timestamp)
@@ -748,7 +541,7 @@ try:
             if next_task is None:
                 break
             empty_row_idx, app_name, task_description = next_task
-            callable_app = general_get_app_func(app_name)
+            callable_app = specific.general_get_app_func(app_name)
             timestamp = experiment_func(callable_app, task_description)
             print(f"Received timestamp: {timestamp}")
             write_timestamp_to_idx(TASK_CSV_PATH, column_namer, empty_row_idx, timestamp)
@@ -768,7 +561,7 @@ try:
             if next_task is None:
                 break
             empty_row_idx, app_name, task_description = next_task
-            callable_app = general_get_app_func(app_name)
+            callable_app = specific.general_get_app_func(app_name)
             timestamp = experiment_func(callable_app, task_description)
             print(f"Received timestamp: {timestamp}")
             write_timestamp_to_idx(TASK_CSV_PATH, column_namer, empty_row_idx, timestamp)
@@ -790,7 +583,7 @@ try:
                 if next_task is None:
                     break
                 empty_row_idx, app_name, task_description = next_task
-                callable_app = general_get_app_func(app_name)
+                callable_app = specific.general_get_app_func(app_name)
                 timestamp = experiment_func(callable_app, task_description)
                 print(f"Received timestamp: {timestamp}")
                 write_timestamp_to_idx(TASK_CSV_PATH, column_namer, empty_row_idx, timestamp)

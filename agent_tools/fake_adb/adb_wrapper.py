@@ -13,6 +13,7 @@ import os
 import numpy as np
 from pathlib import Path
 import base64
+import json
 
 # Try to import fcntl — if it fails, platform doesn't support it
 try:
@@ -41,11 +42,13 @@ except ImportError as e:
     print(f"Wrapper Error: Could not import dependencies: {e}", file=sys.stderr)
     sys.exit(1)
 
-# Define the real ADB executable
-REAL_ADB = str(Path.home() / "Android" / "Sdk" / "platform-tools" / "adb")
-GLOBAL_TOUCH_DEVICE = "/dev/input/event4"
-GLOBAL_EVENT_INTERVAL_US = 11000
-GLOBAL_FAKE_HUMAN = False
+with open(SELF_FOLDER / "adb_wrapper_config.json", "r") as f:
+    config = json.load(f)
+    REAL_ADB = config["real_adb"]
+    GLOBAL_TOUCH_DEVICE = config["global_touch_device"]
+    GLOBAL_EVENT_INTERVAL_US = config["global_event_interval_us"]
+    GLOBAL_FAKE_HUMAN = config["global_fake_human"]
+
 IME_EVENT_PATH_STORAGE =  PROJ_FOLDER / "IME_EVENT_PATH.txt"
 BIN_IME_PATH = SELF_FOLDER / "ime_bin_event_capturer.txt"
 

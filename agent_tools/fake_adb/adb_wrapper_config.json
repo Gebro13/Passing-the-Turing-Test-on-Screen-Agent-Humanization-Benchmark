@@ -1,0 +1,6 @@
+{
+    "real_adb": "/home/<your_user_name>/Android/Sdk/platform-tools/adb",
+    "global_touch_device": "/dev/input/event4",
+    "global_event_interval_us": 11000,
+    "global_fake_human": false
+}

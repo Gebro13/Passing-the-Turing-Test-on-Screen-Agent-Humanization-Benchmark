@@ -92,7 +92,7 @@ if __name__ == "__main__":
         controller.start_sensor_recording("adb", sensor_apk_name=sensor_apk_name, input_sensor_path=input_sensor_path)
         controller.setup_IMEevent_capturer(absolute_IME_path=absolute_output_IME_path)
         if args.automatic_switch_app:
-            automations.switch_app_from_sensorevent_to_appscreen()
+            automations.specific.switch_app_from_sensorevent_to_appscreen()
 
     try:
         with open(automations.TIMESTAMP_RECORDER, "w") as f:
@@ -109,7 +109,7 @@ if __name__ == "__main__":
         controller.nullify_IMEevent_capturer()
 
     if args.automatic_exit_app_and_reset:
-        automations.prepare_apps_screen()
+        automations.specific.prepare_apps_screen()
 
     if can_log:
         automations.write_timestamp_to_idx(
