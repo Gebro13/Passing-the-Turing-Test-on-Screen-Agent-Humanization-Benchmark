@@ -1,9 +1,10 @@
 # Agent Humanization Benchmark (AHB)
 
 <div align="center"><img src="Turing_Test_on_Screen_Icon.png" width="200"></div>
+
 **Turing Test on Screen: A Benchmark for Mobile GUI Agent Humanization**
 
-This repository provides tools for collecting, analyzing, and improving mobile GUI agent behavior to make it more human-like. The benchmark evaluates agents based on their ability to mimic human touch dynamics and physical sensor events to avoid detection by digital platforms.
+This repository provides tools for collecting, analyzing, and improving mobile GUI agent behavior to make it more human-like. The benchmark evaluates agents based on their ability to mimic human touch dynamics to avoid detection by digital platforms.
 
 ## Quick Start Guide
 
@@ -61,13 +62,14 @@ This repository provides tools for collecting, analyzing, and improving mobile G
 Some functionality requires metadata files that are **NOT** in this online repository. You must copy them:
 
 ```bash
-# clone tree/main/metadata from huggingface dataset
+# clone only tree/main/metadata from huggingface dataset
+PWD_TEMP=$(pwd)
 cd ..
 git clone --depth 1 --branch main https://huggingface.co/datasets/lyyang2766/Passing-the-Turing-Test-on-Screen-Agent-Humanization-Benchmark --filter=blob:none --sparse
-cd turing_test_on_screen
+cd Passing-the-Turing-Test-on-Screen-Agent-Humanization-Benchmark
 git sparse-checkout set metadata
-cd -
-cp -r ../metadata/* ./
+cp -r ./metadata/* $PWD_TEMP/
+cd $PWD_TEMP
 ```
 
 This maintains the folder structure (e.g., `metadata/analysis/processing/swipe_data.pkl` → `./analysis/processing/swipe_data.pkl`).
@@ -76,7 +78,7 @@ This maintains the folder structure (e.g., `metadata/analysis/processing/swipe_d
 - `analysis/processing/swipe_data.pkl` - Human swipe data for humanization
 - `data_collection/app_name_translations.json` - App name mappings
 - `tasks.csv` - Task definitions for experiments
-- `Formated_Data_Renamed.xlsx` - Metadata of collected data (e.g., device info, task info)
+- `Formated_Data_Renamed.xlsx` - Metadata of collected data (e.g. agent info, task info, timestamps, success scoring)
 
 ### 2. Prerequisites
 
@@ -138,13 +140,13 @@ python analysis/processing/extract_feature_of_swipes.py \
     --output features.csv
 ```
 
-## Key Concepts
+## Key Concepts Summary
 
 ### Humanization Strategies
 
 1. **Motion Transformation**: Apply mathematical transformations (B-splines, rotation) to raw agent paths
-2. **Temporal Adjustment**: Match human distributions for tap durations and action intervals
-3. **Fake Actions**: Inject non-functional gestures to mask mechanical execution patterns
+2. **Temporal Adjustment**: Match human distributions for action durations
+3. **Fake Actions**: Inject non-functional gestures to mask slow execution patterns
 
 ### Data Collection
 
@@ -159,7 +161,7 @@ Captures four types of data:
 1. Parse raw logs into structured events
 2. Extract kinematic and temporal features
 3. Train classifiers (SVM, XGBoost) to distinguish human vs. agent
-4. Evaluate humanization strategies via AUC reduction
+4. Evaluate humanization strategies via ACC reduction
 
 ## Documentation
 
@@ -173,11 +175,10 @@ Captures four types of data:
 If you use this benchmark in your research, please cite:
 
 ```
-@article{turing_test_on_screen,
-    title={Turing Test on Screen: A Benchmark for Mobile GUI Agent Humanization},
-    author={...},
-    journal={...},
-    year={2026}
+@article{zhu_passing_2026,
+	title = {Passing the {Turing} {Test} on {Screen}: {A} {Benchmark} for {Mobile} {GUI} {Agent} {Humanization}},
+	author = {Zhu, Jiachen and Yang, Lingyu and Shan, Rong and Zheng, Congmin and Zheng, Zeyu and Liu, Weiwen and Yu, Yong and Zhang, Weinan and Lin, Jianghao},
+	year = {2026},
 }
 ```
 
