@@ -1,6 +1,6 @@
 # Agent Humanization Benchmark (AHB)
 
-![Intro](Turing_Test_on_Screen_Icon.png)
+<div align="center"><img src="Turing_Test_on_Screen_Icon.png" width="200"></div>
 **Turing Test on Screen: A Benchmark for Mobile GUI Agent Humanization**
 
 This repository provides tools for collecting, analyzing, and improving mobile GUI agent behavior to make it more human-like. The benchmark evaluates agents based on their ability to mimic human touch dynamics and physical sensor events to avoid detection by digital platforms.
