@@ -1,161 +1,185 @@
-# Agent Humanization Paradigm
+# Agent Humanization Benchmark (AHB)
 
-This is the repository for collecting data from android and parsing them.
+**Turing Test on Screen: A Benchmark for Mobile GUI Agent Humanization**
 
-# Contents
+This repository provides tools for collecting, analyzing, and improving mobile GUI agent behavior to make it more human-like. The benchmark evaluates agents based on their ability to mimic human touch dynamics and physical sensor events to avoid detection by digital platforms.
 
-- [1. Data collection](#1-data-collection)
-    - [Test device availability](#test-device-availability)
-        - [Debugging permissions](#debugging-permissions)
-        - [`getevent`](#getevent)
-        - [`screenrecord`](#screenrecord)
-        - [Launching an apk with `adb`](#launching-an-apk-with-adb)
-    - [Start collecting data](#start-collecting-data)
-- [2. Parsing Data](#2-parsing-data)
-    - [Primitive python test](#primitive-python-test)
+## Quick Start Guide
 
+### I just want to...
 
-# 1. Data collection
+- **Collect human data** → See [data_collection/README.md](data_collection/README.md#collecting-human-data-with-some-automation)
+- **Collect agent data** → See [data_collection/README.md](data_collection/README.md#collecting-agent-data)
+- **Use fake-adb for my agent** → See [agent_tools/fake_adb/README.md](agent_tools/fake_adb/README.md)
+- **Analyze collected data** → See [analysis/README.md](analysis/README.md)
+- **Set up a custom agent for automated data collection** → See [data_collection/README.md](data_collection/README.md#custom-agents)
 
-Dependency: `adb`, `python` on your linux desktop and an android device
+## Project Structure
 
-## Test device availability
+```
+.
+├── agent_tools/fake_adb/          # ADB wrapper for human-like agent behavior
+│   ├── README.md                  # Setup and usage guide
+│   ├── adb_wrapper.py             # Main wrapper implementation
+│   └── adb_wrapper_config.json    # Configuration file; you may need to modify for your device
+│
+├── data_collection/               # Tools for collecting interaction data
+│   ├── README.md                  # Data collection guide
+│   ├── main.py                    # Human data collection entry point
+│   ├── automations.py             # Agent automation orchestration
+│   ├── controller.py              # Recording controllers
+│   ├── automations_agents.json    # Agent configuration
+│   ├── automations_general_android.py  # Generic Android actions
+│   ├── automations_specific_phone.py   # Phone-specific actions; you may need to modify for your device
+│   ├── app_name_translations.json # App name to launcher mapping; please load from metadata files
+│   └── agents/                    # Agent-specific configurations
+│       ├── README.md              # Agent setup guide
+│       └── ui-tars/               # UI-TARS patches and setup
+│
+├── analysis/                      # Data processing and analysis utilities
+│   ├── README.md                  # Analysis guide
+│   ├── lib/                       # Core libraries
+│   │   ├── motionevent_classes.py
+│   │   ├── gesture_log_reader_utils.py
+│   │   ├── sensor_log_reader_utils.py
+│   │   └── feature_library.py
+│   ├── processing/                # Feature extraction and processing
+│   ├── plotting/                  # Visualization tools
+│   └── swipe_data.pkl             # Pre-processed human swipe data; please load from metadata files
+│
+├── analysis_playground.ipynb      # Main analysis Jupyter notebook
+├── requirements.txt               # Python dependencies
+├── Formated_Data_Renamed.xlsx     # Metadata of collected data; please load from metadata files
+└── tasks.csv                      # Task definitions for data collection; please load from metadata files
+```
 
-Please run these commands line by line at first; if some of them cannot run, the error won't show up when you run the python script.
+## Critical Setup Steps
 
-### debugging permissions
+### 1. Metadata Files
+
+Some functionality requires metadata files that are **NOT** in this online repository. You must copy them:
 
 ```bash
-adb devices
-```
-should show a list of device(s) without warning.
-
-### `getevent`
-
-type
-```bash
-adb shell -t -t getevent -lt
-```
-and touch your android's screen; should show some logs being printed out. Press `Ctrl+C` to stop.
-
-### `screenrecord`
-
-#### availability
-May not be available in some legacy devices.
-type 
-```bash
-adb shell screenrecord /sdcard/example1.mp4
-```
-; after a while, press `Ctrl+C` to stop the recording. Then
-```bash
-adb pull /sdcard/example1.mp4 example1.mp4
-```
-to pull it into your current folder.
-
-Also, you can use 
-```bash
-adb shell pkill -l SIGINT screenrecord
-```
-to halt the process without focusing on the terminal.
-
-### Soft Keyboards
-
-you need to install https://github.com/senzhk/ADBKeyBoard to your android device.
-
-Setting the keyboard to it from bash: 
-```bash
-adb shell ime set com.android.adbkeyboard/.AdbIME
+# clone tree/main/metadata from huggingface dataset
+cd ..
+git clone --depth 1 --branch main https://huggingface.co/datasets/lyyang2766/Passing-the-Turing-Test-on-Screen-Agent-Humanization-Benchmark --filter=blob:none --sparse
+cd turing_test_on_screen
+git sparse-checkout set metadata
+cd -
+cp -r ../metadata/* ./
 ```
 
-#### (Optional) Extend maximum recording time to beyond 3 minutes
+This maintains the folder structure (e.g., `metadata/analysis/processing/swipe_data.pkl` → `./analysis/processing/swipe_data.pkl`).
 
-If you want to keep using an android-native command to do screenrecord, but want to extend the maximum recording time to be larger than 180s, you can:
-1. pull the `screenrecord` binary to your PC
-```bash
-adb pull /system/bin/screenrecord screenrecord
-```
-2. `xxd screenrecord > screenrecord.hex` to create a hex dump of the binary
-3. modify the hex dump to change the maximum recording time
-    - For my device, modify the last occurrence of `b400 0000` (int32 180) (3 minutes)
-    - You can modify it into `0807 0000` (1800). We did this, and thus our logging limit is 30min.
-4. `xxd -r screenrecord.hex > screenrecord_modified` to create a modified binary
-5. `chmod +x screenrecord_modified`
-6. push the modified binary back to the device.
-    - To use existing `controller.py`, you need to put the binary under `/data/local/tmp/`.
+**Files that will be copied**:
+- `analysis/processing/swipe_data.pkl` - Human swipe data for humanization
+- `data_collection/app_name_translations.json` - App name mappings
+- `tasks.csv` - Task definitions for experiments
+- `Formated_Data_Renamed.xlsx` - Metadata of collected data (e.g., device info, task info)
 
-Note: 
-- for this method, the default recording time will be longer, but the restriction on `--time-limit` will still be \<=180s. Therefore, you shouldn't use this argument.
-- The process halting command is the sameas before; do not halt `screenrecord_modified`.
+### 2. Prerequisites
 
-### launching our motion logger with `adb`
+- **ADB** installed and configured with USB debugging enabled on Android device
+- **Python** 3.8+ with dependencies: `pip install -r requirements.txt`
+- **Android device** with screen unlocked (no pin/pattern during collection)
+- **ADBKeyboard** installed on device (for IME event capturing): https://github.com/senzhk/ADBKeyBoard
+- **Motion Logger App** installed (for sensor recording): At `data_collection/MyMotionLogger/`
 
-#### availability
+### 3. Screen Recording Modification (Required for 3+ min recordings)
 
-Requirements: `android-studio`(if you want to compile from source), `adb`.
+The default Android `screenrecord` has a 180-second limit. To extend beyond 3 minutes, please view the instructions in [data_collection/README.md](data_collection/README.md#2-configure-screen-recording) to modify the AOSP source and build a custom `screenrecord` binary.
 
-**Compiling from source** Pull the java branch of this repository in another directory; then compile the apk into the phone using `android-studio`.  
-**Direct installation** use the compiled apk.
+## Supported Agents
 
-#### Functionality
+| Agent | Humanization | Status |
+|-------|-------------|--------|
+| UI-TARS | ✅ Full support with patches | Working |
+| MobileAgent-E | ✅ Fake ADB wrapper | Working |
+| CPM-GUI-Agent | ✅ Fake ADB wrapper | Working |
+| OpenAutoGLM | ✅ Fake ADB wrapper | Working |
 
-Existing loggers are set to the highest sampling frequency. You can easily add other sensors and tune the sampling frequency.
+Since we borrow official demos for testing, please see [data_collection/agents/README.md](data_collection/agents/README.md) for setup instructions.
 
-Get the activity to launch:
-```bash
-adb shell pm dump com.example.motionlogger | grep -A 1 "MAIN"
-```
-which yields `com.example.motionlogger/.MainActivity`.
-Then
-```bash
-adb shell am start -S com.example.motionlogger/.MainActivity
-```
-where `-S` stops any previous running instances.
-Then
-```bash
-adb shell am force-stop com.example.motionlogger/.MainActivity
-```
+## Quick Examples
 
-
-
-#### (optional) Making the apk not sleep and record nothing after a while(typically 3 minutes)
-
-change the allowed number of parallel background activities in the system settings' developer options.  
-Also, add the app as debug mode in developer options.
-
-
-### (optional) `getevent`-visible agent swipe
-
-Pull https://github.com/Cartucho/android-touch-record-replay and follow their instructions until you succeed(you probably have to change the binary `mysendevent` to `mysendevent-arm64`).  
-If you follow their instructions, you should end up with a binary under `/data/local/tmp/` in your phone.   
-Then switch back to this repo, and:
-
-```python
-import fake_adb.adb_wrapper as controller_fake_adb
-controller_fake_adb.MotionGenerator.swipe(adb_path="adb", x1=400, y1=1300, x2=800, y2=800, duration_ms=500, evdev="/dev/input/event4")
-```
-generates a swipe programmed with 11000us between each dot but has in fact a $600\pm 200$ us more latency. The number 11000us depends on your device.   
-This may be tolerable because human swipes have also about 11000us between each dot and there is inherent noise over the interval, and the distribution can be shifted accordingly.  
-In comparison, there would have been no preemptive workaround when the base latency was 0.3s per `sendevent`, as in the 6a1315c commit.
-
-## Start collecting data
-
-Warning: due to that timestamp alignment is tricky between motionevent and sensorevent, it is better that don't sleep your phone before collecting data. However, the first line of sensor data contains an offset in ns.
-no need to launch the individual collectors.
-
-Collecting human data:
-```bash
-python data_collection/main.py --automatic_exit_app_and_reset --automatic_switch_app --user <user_name_just_add_to_the_csv_columns> --task_provide_file tasks.csv --automatically_prepare_provided_task_app
-```
-Press enter to stop, don't press ctrl+c.
-
-Collecting agent data:
-```bash
-python automations.py
-```
-no need to launch the individual collectors.
-
-## (Optional) compressing the recorded video
+### Collect Human Data
 
 ```bash
-bash convert_to_h265.sh --time_stamp 20250903_181934
+python data_collection/main.py \
+    --user your_username \
+    --task_provide_file tasks.csv \
+    --automatically_prepare_provided_task_app \
+    --automatic_switch_app \
+    --automatic_exit_app_and_reset
 ```
+
+### Collect Agent Data
+
+```bash
+# Run automated experiments
+python data_collection/automations.py
+```
+For running other agents not listed in the [supported agents table](#supported-agents), please see [data_collection/README.md](data_collection/README.md#experiment-with-agents-not-listed-in-automations_agentsjson) for instructions on how to set up and run with the fake ADB wrapper.
+
+### Analyze Data
+
+You need to download data that you want to analyze from the Huggingface dataset, unzip and place anywhere within the `logs/` folder. Then,
+
+Open the Jupyter notebook:
+```bash
+jupyter notebook analysis_playground.ipynb
+```
+
+Or use command-line tools(not recommended):
+```bash
+python analysis/processing/extract_feature_of_swipes.py \
+    --input-glob "logs/gesture_recording_*.log" \
+    --output features.csv
+```
+
+## Key Concepts
+
+### Humanization Strategies
+
+1. **Motion Transformation**: Apply mathematical transformations (B-splines, rotation) to raw agent paths
+2. **Temporal Adjustment**: Match human distributions for tap durations and action intervals
+3. **Fake Actions**: Inject non-functional gestures to mask mechanical execution patterns
+
+### Data Collection
+
+Captures four types of data:
+- **Motion Events**: Raw touch input from `/dev/input/eventX`
+- **Sensor Events**: Accelerometer, gyroscope, magnetometer from motion logger app
+- **Screen Recordings**: Video of device screen during interaction
+- **IME Events**: Keyboard input events for text analysis
+
+### Analysis Pipeline
+
+1. Parse raw logs into structured events
+2. Extract kinematic and temporal features
+3. Train classifiers (SVM, XGBoost) to distinguish human vs. agent
+4. Evaluate humanization strategies via AUC reduction
+
+## Documentation
+
+- **[agent_tools/fake_adb/README.md](agent_tools/fake_adb/README.md)** - Fake ADB wrapper setup and API
+- **[data_collection/README.md](data_collection/README.md)** - Data collection workflow and configuration
+- **[analysis/README.md](analysis/README.md)** - Data analysis and feature extraction
+- **[data_collection/agents/README.md](data_collection/agents/README.md)** - Agent setup and integration
+
+## Citation
+
+If you use this benchmark in your research, please cite:
+
+```
+@article{turing_test_on_screen,
+    title={Turing Test on Screen: A Benchmark for Mobile GUI Agent Humanization},
+    author={...},
+    journal={...},
+    year={2026}
+}
+```
+
+## License
+
+Part of the Agent Humanization Benchmark (AHB) research project.
