@@ -66,17 +66,17 @@ Edit `adb_wrapper_config.json`:
 | `real_adb` | Path to your actual ADB binary | `/home/user/Android/Sdk/platform-tools/adb` |
 | `global_touch_device` | Touch device input path on Android | `/dev/input/event4` |
 | `global_event_interval_us` | Time interval between dots in swipe (microseconds) | `11000` (11ms) |
-| `global_fake_human` | Enable human-like behavior (vs bot-like) | `true` or `false` |
+| `global_fake_human` | Enable human-like behavior for single actions (vs bot-like) | `true` or `false` |
 
 **Note**: 
 - The `global_touch_device` value is device-specific. Find it by:
 ```bash
-adb shell getevent -l | grep ABS_MT_POSITION
+adb shell -t -t getevent -lt | grep ABS_MT_POSITION
 ```
 The output will show the device path (e.g., `/dev/input/event4`).
-- The `global_event_interval_us` value is also device-specific. Find it out by running the sensor logger `MyMotionLogger` app, then run `adb shell input swipe 100 500 900 500` to make a swipe on the blank zone in the sensor logger app, and check the sensorevent log for the timestamps of Motion Events.
+- The `global_event_interval_us` value may also be device-specific. Find it out by running `adb shell -t -t getevent -lt` on the host, then use your finger to swipe the screen, and check the output for the timestamps. Another method for double-checking: Running the sensor logger `MyMotionLogger` app, then run `adb shell input swipe 100 500 900 500` or use your finger to make a swipe on the blank zone in the sensor logger app, and check the sensorevent log for the timestamps of Motion Events.
 
-- The time taken for a tap is actually also device-specific. Find it out by tapping on the blank zone in the sensor logger app with `adb shell input tap 500 800` and checking the interval between the down event and up event in the sensor logger. Adjust the default 1000us in `do_tap()` if needed.
+- The time taken for a non-humanized tap may also be device-specific. Find it out by tapping on the blank zone in the sensor logger app with `adb shell input tap 500 800` and checking the interval between the down event and up event in the sensor logger. Adjust the default 1000us in `do_tap()` if needed.
 
 ## Usage
 
