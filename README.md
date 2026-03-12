@@ -62,7 +62,7 @@ This repository provides tools for collecting, analyzing, and improving mobile G
 Some functionality requires metadata files that are **NOT** in this online repository. You must copy them:
 
 ```bash
-# clone only tree/main/metadata from huggingface dataset
+# download only tree/main/metadata from huggingface dataset
 PWD_TEMP=$(pwd)
 cd ..
 git clone --depth 1 --branch main https://huggingface.co/datasets/lyyang2766/Passing-the-Turing-Test-on-Screen-Agent-Humanization-Benchmark --filter=blob:none --sparse

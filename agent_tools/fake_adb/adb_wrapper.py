@@ -114,13 +114,12 @@ def raw_log_str(str1: str):
 def log_char(char_or_str: str) -> None:
     # We use os.system here to match controller.py's behavior exactly
     # replace " and ' in char_or_str to avoid shell issues
-    char_or_str = char_or_str.replace('"', '\\"').replace("'", "\\'")
-    raw_log_str(f"{get_current_phone_timestamp()} \\`{char_or_str}\\`\n")
+    raw_log_str(f"{get_current_phone_timestamp()} `{char_or_str}`\n")
 
 def log_base64_encoded_and_decoded_str(base64_str: str) -> None:
     decoded_bytes = base64.b64decode(base64_str)
     decoded_str = decoded_bytes.decode('utf-8')
-    raw_log_str(f"{get_current_phone_timestamp()} B64: \\`{base64_str}\\` Decoded: \\`{decoded_str}\\`\n")
+    raw_log_str(f"{get_current_phone_timestamp()} B64: `{base64_str}` Decoded: `{decoded_str}`\n")
 
 def log_special_key(key_name: str) -> None:
     raw_log_str(f"{get_current_phone_timestamp()} <{key_name}>\n")

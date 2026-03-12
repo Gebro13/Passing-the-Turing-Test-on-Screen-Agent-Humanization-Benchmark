@@ -91,8 +91,8 @@ def ctrip_disturbance_resolution():
 
 def eleme():
     general.tap(132, 843) # open eleme
-    time.sleep(7.0)
-    general.tap(210, 927) # select sjtu as the place
+    time.sleep(8.0)
+    general.tap(210, 927) # select default location as the place
     time.sleep(1.0)
 
 def eleme_cleanup():
