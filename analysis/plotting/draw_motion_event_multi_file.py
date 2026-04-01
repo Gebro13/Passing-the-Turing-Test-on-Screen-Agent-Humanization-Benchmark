@@ -3,23 +3,23 @@ import argparse
 import pandas as pd
 from pathlib import Path
 from typing import Tuple, List
-from analysis.lib.motionevent_classes import FingerEvent
-from analysis.processing.extract_feature_of_swipes import cleanse_into_swipe
+from analysis.lib.motionevent_classes import SingularActionType
+from analysis.processing.extract_feature_of_swipes import keep_swipe
 from analysis.processing.tap_duration_extract import leave_taps
 from analysis.processing.interval_extract import filter_null
 from analysis.plotting.draw_motion_event2 import throw_away_timestamp, plot_gestures
 from functools import partial
 import matplotlib.pyplot as plt
 
-def chain_gesture_iterators_filtered(filter_type: str, gesture_iterator: List[Tuple[str, str, List[List[FingerEvent]]]]) -> List[List[FingerEvent]]:
-    result: List[List[FingerEvent]] = []
+def chain_gesture_iterators_filtered(filter_type: str, gesture_iterator: List[Tuple[str, str, List[SingularActionType]]]) -> List[SingularActionType]:
+    result: List[SingularActionType] = []
     for gesture_name, session_timestamp, gesture in gesture_iterator:
         if filter_type in gesture_name:
             result += gesture
     return result
 
-def filterless_gesture_iterators(gesture_iterator: List[Tuple[str, str, List[List[FingerEvent]]]]) -> List[List[FingerEvent]]:
-    result: List[List[FingerEvent]] = []
+def filterless_gesture_iterators(gesture_iterator: List[Tuple[str, str, List[SingularActionType]]]) -> List[SingularActionType]:
+    result: List[SingularActionType] = []
     for gesture_name, session_timestamp, gesture in gesture_iterator:
         result += gesture
     return result
@@ -35,9 +35,9 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if (args.gesture_target == "swipe"):
-        gesture_filter = cleanse_into_swipe
+        gesture_filter = keep_swipe
     elif (args.gesture_target == "tap"):
-        gesture_filter = partial(leave_taps, tap_len_max=3)
+        gesture_filter = leave_taps
     else:
         gesture_filter = filter_null
 

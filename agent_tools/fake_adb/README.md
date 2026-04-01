@@ -147,6 +147,16 @@ These can be called in parallel with agent actions to mask timing patterns.
 
 ## Advanced Features
 
+### Swipe Trace Replay
+(Actually a very basic feature, for testing whether the setup works or not)
+
+In this directory, run 
+```bash
+adb shell -t -t getevent -lt > single_trace.txt
+```
+, make a swipe, ctrl+c to stop, then run `single_replayer.py` to replay the same swipe with the wrapper's humanization logic applied. This is useful for testing and debugging the setup.
+
+
 ### Tap Position Recording
 
 Fake action 3 uses the last tap position as circle center. The wrapper automatically records tap positions:

@@ -1,13 +1,14 @@
-from typing import Optional, List, Dict, Tuple, Callable
+from typing import Final, Optional, List, Dict, Tuple, Callable, Union
 import re
 from re import Match
-from analysis.lib.motionevent_classes import FingerEvent, SessionType
+from unittest import result
+from analysis.lib.motionevent_classes import FingerEvent, SessionType, SingularActionType, is_integral
 from pathlib import Path
 import pandas as pd
 import os
 from functools import partial
 
-def hex_to_dec(hex_str):
+def hex_to_dec(hex_str: str) -> int:
     return int(hex_str, 16)
 
 def file_finder(search_scope: Path, file_name: str) -> Path:
@@ -57,7 +58,7 @@ def file_finder(search_scope: Path, file_name: str) -> Path:
         raise FileExistsError(f"Multiple files named '{target_name}' found under {scope}:\n{listed}")
     return matches[0]
 
-def file_reader_yield(file_path: str) -> List[str]:
+def file_reader_yield(file_path: Union[str, Path]) -> List[str]:
     """
     Generator to read a file line by line.
     """
@@ -65,78 +66,107 @@ def file_reader_yield(file_path: str) -> List[str]:
         lines = file.readlines()
     return lines
 
-def single_trace_generator(adb_getevent_generator: List[str], thres_after_1st_menu_s: Optional[int] = None) -> List[List[FingerEvent]]:
-    """disappearing point is included, which actually disrupts the trace"""
-    current_gesture = []
-    current_id = None
-    x, y, t_us = None, None, None
-
+def single_trace_generator(adb_getevent_generator: List[str]) -> List[SingularActionType]:
+    """
+        Parse the output of adb getevent -lt and generate a list of traces, where each trace is a list of FingerEvent objects.
+        Only support single-finger traces.
+        Only support format B.
+        disappearing point is included, which actually disrupts the trace.
+        However, the disappearing point(the last point) is existent in the app collection with same x and y so we keep it.  
+    """
+    current_gesture: List[FingerEvent] = []
+    x: Optional[int] = None
+    y: Optional[int] = None
+    t_us: Optional[int] = None
+    TERMINATION_ID: Final[str] = 'ffffffff' # the id indicating the finger is lifted, which is inherited by the next trace if not replaced by a new id.
+    inherited_id: str = TERMINATION_ID # the id inherited from the previous trace, which is TERMINATION_ID if no previous trace or the previous trace has been terminated. This is used to determine whether a new trace starts or the current trace ends when we encounter a SYN_REPORT line.
+    last_is_syn_report: bool = True # only used to examine timestamp discrepancies.
+    
     id_pattern = re.compile(r'ABS_MT_TRACKING_ID\s+([0-9a-f]+)')
     x_pattern = re.compile(r'ABS_MT_POSITION_X\s+([0-9a-f]+)')
     y_pattern = re.compile(r'ABS_MT_POSITION_Y\s+([0-9a-f]+)')
     time_pattern = re.compile(r'^\[ {0,8}([0-9]+)\.([0-9]+)\]')
     
-    time_start_us = None
-
-    result: List[List[FingerEvent]] = []
+    result: List[SingularActionType] = []
 
     for line in adb_getevent_generator:
+        
+        time_match: Optional[Match[str]] = time_pattern.search(line)
+        if time_match is None:
+            raise ValueError(f"Unexpected log format: timestamp not found in line: {line}")
+
         id_match = id_pattern.search(line)
         x_match = x_pattern.search(line)
         y_match = y_pattern.search(line)
-        time_match: Match[str] = time_pattern.search(line)
-        if (thres_after_1st_menu_s is not None) and (time_start_us is None) and ("MENU" in line):
-            time_start_us = int(time_match.group(1)) * int(1e6) + int(time_match.group(2))
-            time_end_us = time_start_us + thres_after_1st_menu_s * int(1e6)
-            print(f"First MENU detected at {time_start_us} us, threshold set to {time_end_us} microseconds.")
-        if (time_start_us is not None) and (time_match is not None):
-            t_us = int(time_match.group(1)) * int(1e6) + int(time_match.group(2))
-            if t_us > time_end_us:
-                # If the current event is beyond the threshold, we stop the gesture.
-                if current_gesture:
-                    result.append(current_gesture)
-                current_gesture = []
-                break
+        syn_report_in_line = "SYN_REPORT" in line
 
-        if id_match:
-            tracking_id = id_match.group(1)
-            if tracking_id != 'ffffffff':
-                # Finger pressed down — start a new gesture
-                current_id = tracking_id
-                current_gesture = []
-            else:
-                # Finger lifted — current gesture ends
-                if current_gesture:
-                    if time_match:
-                        # add disappearing point, which actually disrupts the trace.
-                        t_us = int(time_match.group(1)) * int(1e6) + int(time_match.group(2))
-                        current_gesture.append(FingerEvent(timestamp_us=t_us, x=x, y=y))
-                    result.append(current_gesture)
-                current_id = None
-                current_gesture = []
+        # assert exactly one of id_match, x_match, y_match, SYN_REPORT is not None in each line, otherwise the log format is unexpected and we raise an error.
+        if (sum(match is not None for match in [id_match, x_match, y_match]) + int(syn_report_in_line)) > 1:
+            raise ValueError(f"Unexpected log format: multiple matches in line: {line}")
 
-        if current_id is not None:
-            if x_match:
-                x: int = hex_to_dec(x_match.group(1))
-            if y_match:
-                y: int = hex_to_dec(y_match.group(1))
-            if time_match:
-                t_us: int = int(time_match.group(1)) * int(1e6) + int(time_match.group(2))
+        if time_match is not None:
+            t_us_tmp = int(time_match.group(1)) * int(1e6) + int(time_match.group(2))
+            
+            if not last_is_syn_report and (t_us != t_us_tmp):
+                raise ValueError(f"Timestamp discrepancy detected. Previous timestamp: {t_us}, current timestamp: {t_us_tmp}. This may indicate an unexpected log format or missing SYN_REPORT lines.")
+            t_us = t_us_tmp
 
+        if id_match is not None:
+            fleeting_id = id_match.group(1)
+            
+            # exactly one of fleeting_id and inherit_id should be TERMINATION_ID, otherwise the log format is unexpected and we raise an error.
+            if (fleeting_id == TERMINATION_ID) == (inherited_id == TERMINATION_ID):
+                raise ValueError(f"Unexpected log format: invalid id inheritance. fleeting_id: {fleeting_id}, inherited_id: {inherited_id}, line: {line}")
+            inherited_id = fleeting_id
+
+            last_is_syn_report = False
+
+        elif x_match is not None:
+            x = hex_to_dec(x_match.group(1))
+            
+            last_is_syn_report = False
+
+        elif y_match is not None:
+            y = hex_to_dec(y_match.group(1))
+            
+            last_is_syn_report = False
+        
+        elif syn_report_in_line:
             # SYN_REPORT indicates the current sample is completed
-            if "SYN_REPORT" in line: # and x is not None and y is not None:
-                current_gesture.append(FingerEvent(timestamp_us=t_us, x=x, y=y))
-                # x, y = None, None shouldn't reset the saved values
+            
+            # if any of t_us, x, y is None, it means the current sample is incomplete, which may be caused by unexpected log format or missing lines. We raise an error in this case.
+            if (t_us is None) or (x is None) or (y is None):
+                raise ValueError(f"Unexpected log format: incomplete sample before SYN_REPORT: {line}")
+
+            current_gesture.append(FingerEvent(timestamp_us=t_us, x=x, y=y))
+            # x, y = None, None shouldn't reset the saved values
+
+            if not isinstance(inherited_id, str):
+                raise ValueError(f"Unexpected log format: inherited_id is not set before SYN_REPORT: {line}")
+
+            if inherited_id == TERMINATION_ID:
+                # Finger lifted — current gesture ends
+                # currently current_gesture must have length > 0.
+                result.append(current_gesture)
+                current_gesture = []    
+            
+            last_is_syn_report = True
+
+    if (not last_is_syn_report) or (not inherited_id == TERMINATION_ID) or (len(current_gesture) > 0):
+        raise ValueError(f"Unexpected log format: log ended without proper termination. last_is_syn_report: {last_is_syn_report}, inherited_id: {inherited_id}")
+
     return result
 
 
+def null_object_warning() -> None:
+    print("Null item detected. These guards are useful after all.")
 
-def gesture_generator_from_files(df_idx: pd.DataFrame, logs_dir: Path) -> List[Tuple[str, str, List[List[FingerEvent]]]]:
+def gesture_generator_from_files(df_idx: pd.DataFrame, logs_dir: Path) -> List[Tuple[str, str, List[SingularActionType]]]:
     """Read df_idx(the catalog of logs), iterate logs, extract unmodified swipes, and return a List of Lists.
     The resulting DataFrame has a 'type' column followed by feature columns.
     resuiting list have: (participant, session_time_stamp, gestures)
     """
-    result: List[Tuple[str, str, List[List[FingerEvent]]]] = []
+    result: List[Tuple[str, str, List[SingularActionType]]] = []
     for _, row in df_idx.iterrows():
         log_num: str = str(row["log_num"])  # e.g., 20250714_162513
         label: str = str(row["type"])      # class label
@@ -155,15 +185,15 @@ def gesture_generator_from_files(df_idx: pd.DataFrame, logs_dir: Path) -> List[T
                 thres = int(total_len) - int(first_tap)
             except Exception:
                 thres = None
-        result.append((label, log_num, single_trace_generator(file_reader_yield(str(log_file)), thres_after_1st_menu_s=thres)))
+        result.append((label, log_num, single_trace_generator(file_reader_yield(str(log_file)))))
     return result
 
 def filtered_gestures_generation(
-        gesture_iterator: List[List[FingerEvent]], 
-        filtering_and_modification_function: Callable[[List[FingerEvent]], Optional[List[FingerEvent]]]
-    ) -> List[List[FingerEvent]]:
+        gesture_iterator: List[SingularActionType], 
+        filtering_and_modification_function: Callable[[SingularActionType], Optional[SingularActionType]]
+    ) -> List[SingularActionType]:
     """Apply filtering_and_modification_function to each swipe list and return a filtered list. If None, skip."""
-    result: List[List[FingerEvent]] = []
+    result: List[SingularActionType] = []
     for gesture in gesture_iterator:
         filtered_gesture = filtering_and_modification_function(gesture)
         if filtered_gesture is not None:
@@ -174,8 +204,8 @@ def filtered_gestures_generation(
 def filtered_gesture_generator_from_files(
     df_idx: pd.DataFrame,
     logs_dir: Path,
-    filtering_and_modification_function: Callable[[List[FingerEvent]], Optional[List[FingerEvent]]],
-) -> List[Tuple[str, str, List[List[FingerEvent]]]]:
+    filtering_and_modification_function: Callable[[SingularActionType], Optional[SingularActionType]],
+) -> List[Tuple[str, str, List[SingularActionType]]]:
     """
     for df_idx, generate filtered gestures from files in logs_dir using filtering_and_modification_function.
     
@@ -184,12 +214,12 @@ def filtered_gesture_generator_from_files(
     :param logs_dir: 
     :type logs_dir: Path
     :param filtering_and_modification_function: Description
-    :type filtering_and_modification_function: Callable[[List[FingerEvent]], Optional[List[FingerEvent]]]
+    :type filtering_and_modification_function: Callable[[SingularActionType], Optional[SingularActionType]]
     :return: A list of tuples containing participant tag, session timestamp, and filtered gestures; one tuple per file.
-    :rtype: List[Tuple[str, str, List[List[FingerEvent]]]]
+    :rtype: List[Tuple[str, str, List[SingularActionType]]]
     """
 
-    result: List[Tuple[str, str, List[List[FingerEvent]]]] = []
+    result: List[Tuple[str, str, List[SingularActionType]]] = []
     for participant, session_timestamp, swipe_iterator in gesture_generator_from_files(df_idx, logs_dir):
         # skip the nullified swipes
         filtered_swipe_iterator = filtered_gestures_generation(swipe_iterator, filtering_and_modification_function)
@@ -199,8 +229,8 @@ def filtered_gesture_generator_from_files(
 def filtered_gesture_generator_from_files_no_timestamp(
     df_idx: pd.DataFrame,
     logs_dir: Path,
-    filtering_and_modification_function: Callable[[List[FingerEvent]], Optional[List[FingerEvent]]],
-) -> List[Tuple[str, List[List[FingerEvent]]]]:
+    filtering_and_modification_function: Callable[[SingularActionType], Optional[SingularActionType]],
+) -> List[Tuple[str, List[SingularActionType]]]:
     return [(tupling[0], tupling[2]) for tupling in filtered_gesture_generator_from_files(
         df_idx, logs_dir, filtering_and_modification_function
     )]
@@ -221,17 +251,16 @@ def check_integrity_of_logs(df_idx: pd.DataFrame, logs_dir: Path) -> None:
         print("All log files are present.")
 
     # check that every yielded swipe is not None
-    for participant_tag, session_timestamp, swipe_iterator in gesture_generator_from_files(df_idx, logs_dir):
-        for swipe in swipe_iterator:
-            if swipe is None:
+    for participant_tag, session_timestamp, gesture_iterator in gesture_generator_from_files(df_idx, logs_dir):
+        for gesture in gesture_iterator:
+            if gesture is None:
                 raise ValueError(f"Null swipe detected in label {participant_tag}. These guards are useful after all.")
 
-            # check that every FingerEvent has no None attributes
-            for event in swipe:
-                if event is None or event.timestamp_us is None or event.x is None or event.y is None:
-                    raise ValueError(f"Invalid FingerEvent detected in label {participant_tag}: {event}")
+            # check that every gesture has no None attributes
+            if not is_integral(gesture):
+                raise ValueError(f"Non-integral gesture detected in label {participant_tag}. These guards are useful after all.")
 
-def stack_iterator_with_str(label: str, items: List[List[FingerEvent]]) -> List[Tuple[str, List[FingerEvent]]]:
+def stack_iterator_with_str(label: str, items: List[SingularActionType]) -> List[Tuple[str, SingularActionType]]:
     """Stack a label alongside each item in a list."""
     return [(label, item) for item in items]
 
@@ -240,10 +269,10 @@ def ranged_batched_modified_generator_with_session_timestamp(
         participants: List[str], 
         index_range: Optional[List[int]] = None, 
         filtering_and_modification_function: Optional[
-            Callable[[List[List[FingerEvent]]], List[List[FingerEvent]]]
+            Callable[[List[SingularActionType]], List[SingularActionType]]
         ] = None, 
         humanity_disturbance: Optional[
-            Callable[[List[FingerEvent]], List[FingerEvent]]
+            Callable[[SingularActionType], SingularActionType]
         ] = None
         ) -> List[SessionType]:
     """
@@ -266,9 +295,7 @@ def ranged_batched_modified_generator_with_session_timestamp(
                 print(e)
                 continue
             line_generator = file_reader_yield(str(file_path))
-            single_trace_generated = single_trace_generator(
-                line_generator, None
-            )
+            single_trace_generated = single_trace_generator(line_generator)
             if filtering_and_modification_function is not None:
                 swipe_generated = filtering_and_modification_function(single_trace_generated)
             else:
@@ -287,12 +314,12 @@ def ranged_batched_modified_generator_without_session_timestamp(
         participants: List[str], 
         index_range: Optional[List[int]] = None, 
         filtering_and_modification_function: Optional[
-            Callable[[List[List[FingerEvent]]], List[List[FingerEvent]]]
+            Callable[[List[SingularActionType]], List[SingularActionType]]
         ] = None, 
         humanity_disturbance: Optional[
-            Callable[[List[FingerEvent]], List[FingerEvent]]
+            Callable[[SingularActionType], SingularActionType]
         ] = None
-        ) -> List[List[FingerEvent]]:
+        ) -> List[SingularActionType]:
     """
     formated_data_timestamps: DataFrame with participant names as columns and timestamps as values
     """
@@ -303,7 +330,7 @@ def ranged_batched_modified_generator_without_session_timestamp(
             filtering_and_modification_function=filtering_and_modification_function,
             humanity_disturbance=humanity_disturbance
         )
-    result: List[List[FingerEvent]] = []
+    result: List[SingularActionType] = []
     for timestamp, swipes in result_with_timestamps:
         result += swipes
     return result
@@ -313,12 +340,12 @@ def ranged_modified_generator_without_session_timestamp(
         participants: List[str], 
         index_range: Optional[List[int]] = None, 
         filtering_and_modification_function: Optional[
-            Callable[[List[FingerEvent]], Optional[List[FingerEvent]]]
+            Callable[[SingularActionType], Optional[SingularActionType]]
         ] = None, 
         humanity_disturbance: Optional[
-            Callable[[List[FingerEvent]], List[FingerEvent]]
+            Callable[[SingularActionType], SingularActionType]
         ] = None
-        ) -> List[List[FingerEvent]]:
+        ) -> List[SingularActionType]:
     """
     formated_data_timestamps: DataFrame with participant names as columns and timestamps as values
     """
@@ -343,10 +370,10 @@ def ranged_modified_generator_with_session_timestamp(
         participants: List[str], 
         index_range: Optional[List[int]] = None, 
         filtering_and_modification_function: Optional[
-            Callable[[List[FingerEvent]], Optional[List[FingerEvent]]]
+            Callable[[SingularActionType], Optional[SingularActionType]]
         ] = None, 
         humanity_disturbance: Optional[
-            Callable[[List[FingerEvent]], List[FingerEvent]]
+            Callable[[SingularActionType], SingularActionType]
         ] = None
         ) -> List[SessionType]:
     """

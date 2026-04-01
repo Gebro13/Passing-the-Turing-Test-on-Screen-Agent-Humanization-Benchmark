@@ -8,26 +8,37 @@ from typing import List, Dict, Optional, Tuple
 
 import pandas as pd
 
-from analysis.lib.motionevent_classes import FingerEvent
-from analysis.lib.feature_library import extract_features
+from analysis.lib.motionevent_classes import FingerEvent, SingularActionType, is_integral
+from analysis.lib.feature_library import extract_features, PhysicallyCorrectSingleSwipeType, transform_to_physically_correct_single_swipe_type
 from analysis.lib.gesture_log_reader_utils import filtered_gesture_generator_from_files_no_timestamp
+from analysis.processing.judge_library import is_tap
 
-def cleanse_into_swipe(swipe: List[FingerEvent]) -> Optional[List[FingerEvent]]:
+
+def deprecated_cleanse_into_swipe(swipe: SingularActionType) -> Optional[PhysicallyCorrectSingleSwipeType]:
     """
         Keep only the swipes and remove the last point.
+        Deprecated: When extraction features from SingularActionTypes, feature library's extract_features will automatically handle the vanishing point.  
     """
     # Remove points with None coordinates
     if swipe is None:
         return None
-    swipe = swipe[:-1] if len(swipe) > 1 else swipe
+    if not is_integral(swipe):
+        raise NotImplementedError("Currently only integral swipes are supported. Found non-integral swipe. Perhaps only the last point is None; You should examine this.")
     # Remove points with None coordinates
-    swipe = [e for e in swipe if (e.x is not None and e.y is not None)]
-    if len(swipe) > 5:
-        return swipe
+    if not is_tap(gesture=swipe):
+        return transform_to_physically_correct_single_swipe_type(swipe)
     return None
 
+def keep_swipe(gesture: SingularActionType) -> Optional[SingularActionType]:
+    """
+        Keep only the swipes. No change to content.
+    """
+    if is_tap(gesture=gesture):
+        return None
+    return gesture
 
-def build_features_dataframe(one_gesture_generator_for_each_file: List[Tuple[str, List[List[FingerEvent]]]]) -> pd.DataFrame:
+
+def build_features_dataframe(one_gesture_generator_for_each_file: List[Tuple[str, List[SingularActionType]]]) -> pd.DataFrame:
     """
     iterate swipes, extract swipe features, and return a DataFrame.
     
@@ -65,7 +76,7 @@ def main() -> None:
 
     df = build_features_dataframe(
         filtered_gesture_generator_from_files_no_timestamp(
-            pd.read_csv(logs_index_csv), logs_dir, cleanse_into_swipe)
+            pd.read_csv(logs_index_csv), logs_dir, keep_swipe)
     )
     print(f"Built DataFrame with shape {df.shape}")
 

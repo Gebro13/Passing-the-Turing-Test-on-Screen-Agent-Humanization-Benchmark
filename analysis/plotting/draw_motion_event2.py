@@ -1,13 +1,14 @@
 import matplotlib.pyplot as plt
-from analysis.lib.motionevent_classes import FingerEvent
+from analysis.lib.motionevent_classes import FingerEvent, SingularActionType
 from typing import List, Optional, Tuple
 import argparse
 import numpy as np
 from analysis.lib.gesture_log_reader_utils import single_trace_generator, file_reader_yield
 
-def throw_away_timestamp(gesture_generator: List[List[FingerEvent]]) -> List[List[Tuple[int, int]]]:
+def throw_away_timestamp(gesture_generator: List[SingularActionType]) -> List[List[Tuple[int, int]]]:
     """
-    Convert FingerEvent traces to a list of (x, y) tuples, discarding timestamps.
+    Convert FingerEvent traces to a list of (x, y) tuples, discarding timestamps.  
+    Last Redundant Point of SingularActionType is discarded.
     """
     gestures: List[List[Tuple[int, int]]] = []
     for gesture in gesture_generator:
@@ -44,7 +45,7 @@ def plot_gestures(gestures: List[List[Tuple[int, int]]], have_legend: bool = Tru
     plt.gca().xaxis.set_ticks_position('top')
     plt.show()
 
-def plot_gestures_2(gesture_generator: List[List[FingerEvent]]) -> None:
+def plot_gestures_2(gesture_generator: List[SingularActionType]) -> None:
     gestures = throw_away_timestamp(gesture_generator)
     plot_gestures(gestures)
 
@@ -59,11 +60,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Process ADB events and save gestures.")
     parser.add_argument('--file_path', type=str, help='Path to the ADB event log file', default='./logs/gesture_recording_20250714_162513.log')
     parser.add_argument('--output_path', type=str, help='Path to save the gestures JSON file', default='gestures.json')
-    parser.add_argument("--thres_after_1st_menu_s", type=int, default=None, help="Legacy parameter to deal with getevents that didn't terminate properly.")
     args = parser.parse_args()
 
 
-    gestures = throw_away_timestamp(single_trace_generator(file_reader_yield(args.file_path), args.thres_after_1st_menu_s))
+    gestures = throw_away_timestamp(single_trace_generator(file_reader_yield(args.file_path)))
 
     print(f"Detected {len(gestures)} gestures in total")
     for idx, gesture in enumerate(gestures, 1):

@@ -1,3 +1,5 @@
+# Deprecated. Only fit for drawing logs that contain only 1x swipe. Please use other motionevent plotters.
+
 import re
 import matplotlib.pyplot as plt
 import numpy as np

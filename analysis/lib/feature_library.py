@@ -6,7 +6,8 @@ from collections import defaultdict
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 from typing import Any, List, Dict, Tuple, Union
-from analysis.lib.motionevent_classes import FingerEvent
+from copy import deepcopy
+from analysis.lib.motionevent_classes import FingerEvent, SingularActionType, END_SAMPLE_XY_IDX
 
 # https://www.britannica.com/story/whats-the-difference-between-speed-and-velocity
 # speed is a scalar value while velocity is with a direction
@@ -32,15 +33,58 @@ def convert_time_to_linux(time_str: str) -> int:
 def euclidean_distance(x1: float, y1: float, x2: float, y2: float) -> float:
     return np.sqrt((x1-x2)**2 + (y1 - y2)**2)
 
-def length_of_swipe(swipe: List[FingerEvent]) -> float:
+def pixel_length(swipe: SingularActionType) -> int:
+    return len(swipe)
+
+PhysicallyCorrectSingleSwipeType = List[FingerEvent]
+
+def transform_to_physically_correct_single_swipe_type(trace: SingularActionType) -> PhysicallyCorrectSingleSwipeType:
+    """
+    This function is to handle the vanishing point issue.
+    """
+    return deepcopy(trace[:-1])
+
+
+def endT_us(swipe: SingularActionType) -> int:
+    """
+    This function really cares about the vanishing point. Since both app and getevent agree that the last time is the vanishing point, we should pass a SingularActionType instead of a truncated one.
+    """
+    return swipe[-1].timestamp_us
+
+"""
+These three functions doesn't care about whether the vanishing point disappears or not.
+"""
+def startT_us(swipe: SingularActionType) -> int:
+    return swipe[0].timestamp_us
+
+def startX(swipe: SingularActionType) -> int:
+    return swipe[0].x
+
+def startY(swipe: SingularActionType) -> int:
+    return swipe[0].y
+
+"""
+These two functions have end XY sampling regulated by the motionevent_classes.
+"""
+def endX(swipe: SingularActionType) -> int:
+    return swipe[END_SAMPLE_XY_IDX].x
+
+def endY(swipe: SingularActionType) -> int:
+    return swipe[END_SAMPLE_XY_IDX].y
+
+def directionless_displacement(swipe: SingularActionType) -> float:
+    return euclidean_distance(startX(swipe), startY(swipe), endX(swipe), endY(swipe))
+
+
+def length_of_swipe(swipe: PhysicallyCorrectSingleSwipeType) -> float:
     d = 0
     for i in range(1,len(swipe)):
         d += euclidean_distance(swipe[i-1].x, swipe[i-1].y, swipe[i].x, swipe[i].y)
     return d
 
-def magnitude_of_average_velocity_of_swipe(swipe: List[FingerEvent]) -> float:
-    displacement = euclidean_distance(swipe[0].x, swipe[0].y, swipe[-1].x, swipe[-1].y)
-    time = swipe[-1].timestamp_us - swipe[0].timestamp_us
+def magnitude_of_average_velocity_of_swipe(swipe: SingularActionType) -> float:
+    displacement = euclidean_distance(startX(swipe), startY(swipe), endX(swipe), endY(swipe))
+    time = endT_us(swipe) - startT_us(swipe)
     velocity = displacement/time
     return velocity
 
@@ -67,14 +111,14 @@ def median_area_of_swipe(swipe: List[FingerEvent]) -> float:
 def get_direction(x1: float, y1: float, x2: float, y2: float) -> float:
     return np.arctan2(y2 - y1, x2 - x1) # using tan is erroneous; use arctan2 to exact TouchAlytics
 
-def acceleration_of_swipe(swipe: List[FingerEvent]) -> float:
+def acceleration_of_swipe(swipe: SingularActionType) -> float:
     # BUG GY
     velocity = magnitude_of_average_velocity_of_swipe(swipe)
-    if (swipe[-1].timestamp_us - swipe[0].timestamp_us) == 0:
+    if (endT_us(swipe) - startT_us(swipe)) == 0:
         return 0
-    return velocity/(swipe[-1].timestamp_us - swipe[0].timestamp_us)
+    return velocity/(endT_us(swipe) - startT_us(swipe))
 
-def get_pairwise_velocities_X(swipe: List[FingerEvent]) -> List[float]:
+def get_pairwise_velocities_X(swipe: PhysicallyCorrectSingleSwipeType) -> List[float]:
     v = [0.0]
     for i in range(1, len(swipe)):
         d = swipe[i].x - swipe[i-1].x
@@ -85,7 +129,7 @@ def get_pairwise_velocities_X(swipe: List[FingerEvent]) -> List[float]:
         v.append(d/t)
     return v
 
-def get_pairwise_velocities_Y(swipe: List[FingerEvent]) -> List[float]:
+def get_pairwise_velocities_Y(swipe: PhysicallyCorrectSingleSwipeType) -> List[float]:
     v = [0.0]
     for i in range(1, len(swipe)):
         d = swipe[i].y - swipe[i-1].y
@@ -96,7 +140,7 @@ def get_pairwise_velocities_Y(swipe: List[FingerEvent]) -> List[float]:
         v.append(d/t)
     return v
 
-def get_pairwise_accelerations(swipe: List[FingerEvent], velocities: List[float]) -> List[float]:
+def get_pairwise_accelerations(swipe: PhysicallyCorrectSingleSwipeType, velocities: List[float]) -> List[float]:
     a = [0.0]
     for i in range(1, len(velocities)):
         dv = velocities[i] - velocities[i-1]
@@ -107,7 +151,7 @@ def get_pairwise_accelerations(swipe: List[FingerEvent], velocities: List[float]
         a.append(dv/dt)
     return a
 
-def get_average_acceleration(swipe: List[FingerEvent]) -> float:
+def get_average_acceleration(swipe: PhysicallyCorrectSingleSwipeType) -> float:
     # Getting acceleration for each point and averaging it per swipe
     avg = 0
     res = 0
@@ -120,7 +164,7 @@ def get_average_acceleration(swipe: List[FingerEvent]) -> float:
     avg = res/len(swipe)
     return avg
 
-def get_initial_acceleration(swipe: List[FingerEvent]) -> float:
+def get_initial_acceleration(swipe: PhysicallyCorrectSingleSwipeType) -> float:
     # Considering inital 5 percent of points per swipe
     n = 0.05 * len(swipe)
     displacement = euclidean_distance(swipe[0].x, swipe[0].y, swipe[int(n)].x, swipe[int(n)].y)
@@ -130,7 +174,7 @@ def get_initial_acceleration(swipe: List[FingerEvent]) -> float:
     acc = displacement/(time ** 2)
     return acc
 
-def get_acceleration_percentile_25(swipe: List[FingerEvent]) -> float:
+def get_acceleration_percentile_25(swipe: PhysicallyCorrectSingleSwipeType) -> float:
     # Considering inital 5 percent of points per swipe TYPO BUG?
     n = 0.25 * len(swipe)
     displacement = euclidean_distance(swipe[0].x, swipe[0].y, swipe[int(n)].x, swipe[int(n)].y)
@@ -140,7 +184,7 @@ def get_acceleration_percentile_25(swipe: List[FingerEvent]) -> float:
     acc = displacement/(time ** 2)
     return acc
 
-def get_acceleration_percentile_50(swipe: List[FingerEvent]) -> float:
+def get_acceleration_percentile_50(swipe: PhysicallyCorrectSingleSwipeType) -> float:
     # Considering inital 5 percent of points per swipe TYPO BUG?
     n = 0.5 * len(swipe)
     displacement = euclidean_distance(swipe[0].x, swipe[0].y, swipe[int(n)].x, swipe[int(n)].y)
@@ -150,7 +194,7 @@ def get_acceleration_percentile_50(swipe: List[FingerEvent]) -> float:
     acc = displacement/(time ** 2)
     return acc
 
-def get_acceleration_percentile_75(swipe: List[FingerEvent]) -> float:
+def get_acceleration_percentile_75(swipe: PhysicallyCorrectSingleSwipeType) -> float:
     # Considering inital 5 percent of points per swipe TYPO BUG?
     n = 0.75 * len(swipe)
     displacement = euclidean_distance(swipe[0].x, swipe[0].y, swipe[int(n)].x, swipe[int(n)].y)
@@ -160,7 +204,7 @@ def get_acceleration_percentile_75(swipe: List[FingerEvent]) -> float:
     acc = displacement/(time ** 2)
     return acc
 
-def get_final_acceleration(swipe: List[FingerEvent]) -> float:
+def get_final_acceleration(swipe: PhysicallyCorrectSingleSwipeType) -> float:
     # Considering final 5 percent of points per swipe TYPO BUG?
     n = 0.05 * len(swipe)
     displacement = euclidean_distance(swipe[int(-n)].x, swipe[int(-n)].y, swipe[-1].x, swipe[-1].y)
@@ -170,7 +214,7 @@ def get_final_acceleration(swipe: List[FingerEvent]) -> float:
     acc = displacement/(time ** 2)
     return acc
 
-def get_magnitude_of_average_initial_velocity(swipe: List[FingerEvent]) -> float:
+def get_magnitude_of_average_initial_velocity(swipe: PhysicallyCorrectSingleSwipeType) -> float:
     # Considering inital 5 percent of points per swipe
     n = 0.05 * len(swipe)
     displacement = euclidean_distance(swipe[0].x, swipe[0].y, swipe[int(n)].x, swipe[int(n)].y)
@@ -180,7 +224,10 @@ def get_magnitude_of_average_initial_velocity(swipe: List[FingerEvent]) -> float
     velocity = displacement/time
     return velocity
 
-def get_velocity_percentile_25(swipe: List[FingerEvent]) -> float:
+"""
+These percentile functions are currently unused.
+"""
+def get_velocity_percentile_25(swipe: PhysicallyCorrectSingleSwipeType) -> float:
     # Considering inital 5 percent of points per swipe TYPO BUG?
     n = 0.25 * len(swipe)
     displacement = euclidean_distance(swipe[0].x, swipe[0].y, swipe[int(n)].x, swipe[int(n)].y)
@@ -190,7 +237,7 @@ def get_velocity_percentile_25(swipe: List[FingerEvent]) -> float:
     vel = displacement/time
     return vel
 
-def get_velocity_percentile_50(swipe: List[FingerEvent]) -> float:
+def get_velocity_percentile_50(swipe: PhysicallyCorrectSingleSwipeType) -> float:
     # Considering inital 5 percent of points per swipe TYPO BUG?
     n = 0.5 * len(swipe)
     displacement = euclidean_distance(swipe[0].x, swipe[0].y, swipe[int(n)].x, swipe[int(n)].y)
@@ -200,7 +247,7 @@ def get_velocity_percentile_50(swipe: List[FingerEvent]) -> float:
     vel = displacement/time
     return vel
 
-def get_velocity_percentile_75(swipe: List[FingerEvent]) -> float:
+def get_velocity_percentile_75(swipe: PhysicallyCorrectSingleSwipeType) -> float:
     # Considering inital 5 percent of points per swipe TYPO BUG?
     n = 0.75 * len(swipe)
     displacement = euclidean_distance(swipe[0].x, swipe[0].y, swipe[int(n)].x, swipe[int(n)].y)
@@ -210,7 +257,7 @@ def get_velocity_percentile_75(swipe: List[FingerEvent]) -> float:
     vel = displacement/time
     return vel
 
-def get_magnitude_of_average_final_velocity(swipe: List[FingerEvent]) -> float:
+def get_magnitude_of_average_final_velocity(swipe: PhysicallyCorrectSingleSwipeType) -> float:
     # Considering final 5 percent of points per swipe
     n = 0.05 * len(swipe)
     displacement = euclidean_distance(swipe[int(-n)].x, swipe[int(-n)].y, swipe[-1].x, swipe[-1].y)
@@ -220,7 +267,7 @@ def get_magnitude_of_average_final_velocity(swipe: List[FingerEvent]) -> float:
     velocity = displacement/time
     return velocity
 
-def get_average_speed(swipe: List[FingerEvent]) -> float:
+def get_average_speed(swipe: PhysicallyCorrectSingleSwipeType) -> float:
     # Getting velocity for each point and averaging it per swipe
     avg = 0
     res = 0
@@ -233,7 +280,7 @@ def get_average_speed(swipe: List[FingerEvent]) -> float:
     avg = res/len(swipe)
     return avg
 
-def speed_of_swipe(swipe: List[FingerEvent]) -> float:
+def speed_of_swipe(swipe: PhysicallyCorrectSingleSwipeType) -> float:
     distance = length_of_swipe(swipe)
     time = swipe[-1].timestamp_us - swipe[0].timestamp_us
     if time == 0:
@@ -241,7 +288,7 @@ def speed_of_swipe(swipe: List[FingerEvent]) -> float:
     speed = distance/time
     return speed
 
-def get_final_speed(swipe: List[FingerEvent]) -> float:
+def get_final_speed(swipe: PhysicallyCorrectSingleSwipeType) -> float:
     # Considering inital 5 percent of points per swipe TYPO BUG?
     n = 0.05 * len(swipe)
     distance = 0
@@ -254,7 +301,7 @@ def get_final_speed(swipe: List[FingerEvent]) -> float:
     speed = distance/time
     return speed
 
-def get_initial_speed(swipe: List[FingerEvent]) -> float:
+def get_initial_speed(swipe: PhysicallyCorrectSingleSwipeType) -> float:
     # Considering inital 5 percent of points per swipe TYPO BUG?
     n = 0.05 * len(swipe)
     distance = 0
@@ -267,7 +314,7 @@ def get_initial_speed(swipe: List[FingerEvent]) -> float:
     speed = distance/time
     return speed 
 
-def get_speed_percentile_25(swipe: List[FingerEvent]) -> float:
+def get_speed_percentile_25(swipe: PhysicallyCorrectSingleSwipeType) -> float:
     # Considering inital 5 percent of points per swipe TYPO BUG?
     n = 0.25 * len(swipe)
     distance = 0
@@ -280,7 +327,7 @@ def get_speed_percentile_25(swipe: List[FingerEvent]) -> float:
     speed = distance/time
     return speed 
 
-def get_speed_percentile_50(swipe: List[FingerEvent]) -> float:
+def get_speed_percentile_50(swipe: PhysicallyCorrectSingleSwipeType) -> float:
     # Considering inital 5 percent of points per swipe TYPO BUG?
     n = 0.50 * len(swipe)
     distance = 0
@@ -293,7 +340,7 @@ def get_speed_percentile_50(swipe: List[FingerEvent]) -> float:
     speed = distance/time
     return speed
 
-def get_speed_percentile_75(swipe: List[FingerEvent]) -> float:
+def get_speed_percentile_75(swipe: PhysicallyCorrectSingleSwipeType) -> float:
     # Considering inital 5 percent of points per swipe TYPO BUG?
     n = 0.75 * len(swipe)
     distance = 0
@@ -306,7 +353,7 @@ def get_speed_percentile_75(swipe: List[FingerEvent]) -> float:
     speed = distance/time
     return speed
 
-def get_deviations(swipe: List[FingerEvent]) -> List[float]:
+def get_deviations(swipe: PhysicallyCorrectSingleSwipeType) -> List[float]:
     devs = []
     if(swipe[0].x == swipe[-1].x):
         for i in swipe:
@@ -330,7 +377,7 @@ def get_deviations(swipe: List[FingerEvent]) -> List[float]:
 # Touchalytics-aligned helpers
 # ---------------------------
 
-def _pairwise_speeds(swipe: List[FingerEvent]) -> List[float]:
+def _pairwise_speeds(swipe: PhysicallyCorrectSingleSwipeType) -> List[float]:
     """
     Instantaneous speed magnitudes between successive points: vi = dist(i-1,i) / dt.
     
@@ -354,7 +401,7 @@ def _pairwise_speeds(swipe: List[FingerEvent]) -> List[float]:
         # last_v = v
     return speeds
 
-def _pairwise_accelerations_from_speeds(swipe: List[FingerEvent], speeds: List[float]) -> List[float]:
+def _pairwise_accelerations_from_speeds(swipe: PhysicallyCorrectSingleSwipeType, speeds: List[float]) -> List[float]:
     """
     Signed acceleration between successive speed samples: ai = (v_i - v_{i-1}) / dt.
     Uses the same dt(i) as between the corresponding points; """ # repeats last valid a if dt<=0.
@@ -376,7 +423,7 @@ def _pairwise_accelerations_from_speeds(swipe: List[FingerEvent], speeds: List[f
         # last_a = a
     return accs
 
-def _segment_directions(swipe: List[FingerEvent]) -> List[float]:
+def _segment_directions(swipe: PhysicallyCorrectSingleSwipeType) -> List[float]:
     """
     Angles (radians) of each segment i-1 -> i via atan2(dy, dx).
     """
@@ -409,7 +456,7 @@ def _mean_resultant_length(angles: List[float]) -> float:
     S = float(np.mean(np.sin(angles)))
     return float(np.hypot(C, S))
 
-def _signed_deviations_from_line(swipe: List[FingerEvent]) -> np.ndarray:
+def _signed_deviations_from_line(swipe: PhysicallyCorrectSingleSwipeType) -> np.ndarray:
     """
     Signed perpendicular deviation of each point to the end-to-end line.
     Positive sign corresponds to left side of the vector p1->p2 (right-handed).
@@ -444,20 +491,20 @@ def _percentile(values: List[float], p: float) -> float:
 # Touchalytics feature functions (F10, F14+)
 # ------------------------------------------
 
-def mean_resultant_length(swipe: List[FingerEvent]) -> float:
+def mean_resultant_length(swipe: PhysicallyCorrectSingleSwipeType) -> float:
     """
     F10: Mean resultant length (MRL) of segment directions.
     """
     return _mean_resultant_length(_segment_directions(swipe)) # DONE check circ_r
 
-def velocity_percentile(swipe: List[FingerEvent], p: float) -> float:
+def velocity_percentile(swipe: PhysicallyCorrectSingleSwipeType, p: float) -> float:
     """
     F14/F15/F16: Percentiles (p = 20/50/80) of instantaneous speed magnitudes.
     """
     v = _pairwise_speeds(swipe)
     return _percentile(v, p)
 
-def acceleration_percentile(swipe: List[FingerEvent], p: float) -> float:
+def acceleration_percentile(swipe: PhysicallyCorrectSingleSwipeType, p: float) -> float:
     """
     F17/F18/F19: Percentiles (p = 20/50/80) of signed accelerations (dv/dt).
     """
@@ -465,7 +512,7 @@ def acceleration_percentile(swipe: List[FingerEvent], p: float) -> float:
     a = _pairwise_accelerations_from_speeds(swipe, v)
     return _percentile(a, p)
 
-def f20_median_velocity_last3(swipe: List[FingerEvent]) -> float:
+def f20_median_velocity_last3(swipe: PhysicallyCorrectSingleSwipeType) -> float:
     """
     F20: Median of the last three instantaneous speeds.
     """
@@ -475,7 +522,7 @@ def f20_median_velocity_last3(swipe: List[FingerEvent]) -> float:
     tail = v[-3:] if len(v) >= 3 else v
     return float(np.median(np.asarray(tail, dtype=float)))
 
-def f21_largest_signed_deviation(swipe: List[FingerEvent]) -> float:
+def f21_largest_signed_deviation(swipe: PhysicallyCorrectSingleSwipeType) -> float:
     """
     F21: Signed deviation value at the point of maximum absolute deviation from end-to-end line.
     """
@@ -495,20 +542,20 @@ def f21_largest_signed_deviation(swipe: List[FingerEvent]) -> float:
     idx = int(np.argmax(np.abs(devs)))
     return float(devs[idx])
 
-def f22_24_deviation_percentile(swipe: List[FingerEvent], p: float) -> float:
+def f22_24_deviation_percentile(swipe: PhysicallyCorrectSingleSwipeType, p: float) -> float:
     """
     F22/F23/F24: Percentiles (p = 20/50/80) of signed deviations to end-to-end line.
     """
     devs = _signed_deviations_from_line(swipe).tolist()
     return _percentile(devs, p)
 
-def f25_circular_mean_direction(swipe: List[FingerEvent]) -> float:
+def f25_circular_mean_direction(swipe: PhysicallyCorrectSingleSwipeType) -> float:
     """
     F25: Circular mean of segment directions (radians).
     """
     return _circular_mean(_segment_directions(swipe))
 
-def f27_ratio_end_to_length(swipe: List[FingerEvent]) -> float:
+def f27_ratio_end_to_length(swipe: PhysicallyCorrectSingleSwipeType) -> float:
     """
     F27: Ratio of end-to-end distance to trajectory length.
     """
@@ -518,7 +565,7 @@ def f27_ratio_end_to_length(swipe: List[FingerEvent]) -> float:
     disp = euclidean_distance(swipe[0].x, swipe[0].y, swipe[-1].x, swipe[-1].y)
     return float(disp / length)
 
-def f29_median_initial_acc_first5pnt(swipe: List[FingerEvent]) -> float:
+def f29_median_initial_acc_first5pnt(swipe: PhysicallyCorrectSingleSwipeType) -> float:
     """
     F29: Median acceleration over the initial window."""
 #   WARNING: Adapted from "first 5 points" to "first 5% of points" as requested.
@@ -540,58 +587,8 @@ def f29_median_initial_acc_first5pnt(swipe: List[FingerEvent]) -> float:
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 # Feature Engineering
-def extract_features(swipe: List[FingerEvent]) -> Dict[str, float]:
+def extract_features(swipe: SingularActionType) -> Dict[str, float]:
     X: Dict[str, float] = {}
     """
     vx = get_pairwise_velocities_X(swipe)
@@ -600,33 +597,41 @@ def extract_features(swipe: List[FingerEvent]) -> Dict[str, float]:
     ay = get_pairwise_accelerations(swipe, vy)
     deviations = get_deviations(swipe)
     """
+    physically_correct_swipe = transform_to_physically_correct_single_swipe_type(swipe)
+    # featureStr{1} ='user id';
+    # featureStr{2  } = 'doc id';
     # Fix this line at line .*03
-    X['duration'] = swipe[-1].timestamp_us - swipe[0].timestamp_us #i
-    X['startX'] = swipe[0].x #i
-    X['startY'] = swipe[0].y #i
-    X['endX'] = swipe[-1].x #i
-    X['endY'] = swipe[-1].y #i
-    X['displacement'] = euclidean_distance(swipe[0].x, swipe[0].y, swipe[-1].x, swipe[-1].y) #d
-    X['meanResultantLength'] = mean_resultant_length(swipe)  # F10
+    X['duration'] = endT_us(swipe) - startT_us(swipe) #i
+    X['startX'] = startX(swipe) #i
+    X['startY'] = startY(swipe) #i
+    X['endX'] = endX(swipe) #i
+    X['endY'] = endY(swipe) #i
+    X['displacement'] = directionless_displacement(swipe) #d
+    X['meanResultantLength'] = mean_resultant_length(physically_correct_swipe)  # F10
     # F11 UDLR flag not implemented
-    X['direction'] = get_direction(swipe[0].x, swipe[0].y, swipe[-1].x, swipe[-1].y) #d
+    X['direction'] = get_direction(startX(swipe), startY(swipe), endX(swipe), endY(swipe)) #d
     # F13 phone id not implemented
-    X['v20'] = velocity_percentile(swipe, 20.0)  # F14 # F14–F16: 20/50/80% percentiles of instantaneous speed magnitudes
-    X['v50'] = velocity_percentile(swipe, 50.0)  # F15
-    X['v80'] = velocity_percentile(swipe, 80.0)  # F16
-    X['a20'] = acceleration_percentile(swipe, 20.0)  # F17 # F17–F19: 20/50/80% percentiles of signed accelerations (dv/dt)
-    X['a50'] = acceleration_percentile(swipe, 50.0)  # F18
-    X['a80'] = acceleration_percentile(swipe, 80.0)  # F19
-    X['v_last3_median'] = f20_median_velocity_last3(swipe)  # F20: median of last 3 instantaneous speeds
-    X['maxDevSigned'] = f21_largest_signed_deviation(swipe)  # F21: largest signed deviation from end-to-end line
-    X['dev20'] = f22_24_deviation_percentile(swipe, 20.0)  # F22 # F22–F24: 20/50/80% percentiles of signed deviations
-    X['dev50'] = f22_24_deviation_percentile(swipe, 50.0)  # F23
-    X['dev80'] = f22_24_deviation_percentile(swipe, 80.0)  # F24   
-    X['avgDirection'] = f25_circular_mean_direction(swipe)  # F25: circular mean of segment directions
-    X['length'] = length_of_swipe(swipe) #i # F26: length of trajectory (already implemented below as 'length')
-    X['ratio_end_to_length'] = f27_ratio_end_to_length(swipe)   # F27: ratio end-to-end / length
-    X['speed'] = speed_of_swipe(swipe) #d # F28: average speed = length / duration (already implemented below as 'speed')
-    X['acc_first5pct_median'] = f29_median_initial_acc_first5pnt(swipe)  # F29 (WARNING: 5% points) # F29: median initial acceleration over first 5% of segments
+    X['v20'] = velocity_percentile(physically_correct_swipe, 20.0)  # F14 # F14–F16: 20/50/80% percentiles of instantaneous speed magnitudes
+    X['v50'] = velocity_percentile(physically_correct_swipe, 50.0)  # F15
+    X['v80'] = velocity_percentile(physically_correct_swipe, 80.0)  # F16
+    X['a20'] = acceleration_percentile(physically_correct_swipe, 20.0)  # F17 # F17–F19: 20/50/80% percentiles of signed accelerations (dv/dt)
+    X['a50'] = acceleration_percentile(physically_correct_swipe, 50.0)  # F18
+    X['a80'] = acceleration_percentile(physically_correct_swipe, 80.0)  # F19
+    X['v_last3_median'] = f20_median_velocity_last3(physically_correct_swipe)  # F20: median of last 3 instantaneous speeds
+    X['maxDevSigned'] = f21_largest_signed_deviation(physically_correct_swipe)  # F21: largest signed deviation from end-to-end line
+    X['dev20'] = f22_24_deviation_percentile(physically_correct_swipe, 20.0)  # F22 # F22–F24: 20/50/80% percentiles of signed deviations
+    X['dev50'] = f22_24_deviation_percentile(physically_correct_swipe, 50.0)  # F23
+    X['dev80'] = f22_24_deviation_percentile(physically_correct_swipe, 80.0)  # F24   
+    X['avgDirection'] = f25_circular_mean_direction(physically_correct_swipe)  # F25: circular mean of segment directions
+    X['length'] = length_of_swipe(physically_correct_swipe) #i # F26: length of trajectory (already implemented below as 'length')
+    X['ratio_end_to_length'] = f27_ratio_end_to_length(physically_correct_swipe)   # F27: ratio end-to-end / length
+    X['speed'] = speed_of_swipe(physically_correct_swipe) #d # F28: average speed = length / duration (already implemented below as 'speed')
+    X['acc_first5pct_median'] = f29_median_initial_acc_first5pnt(physically_correct_swipe)  # F29 (WARNING: 5% points) # F29: median initial acceleration over first 5% of segments
+    # featureStr{30 } = 'mid-stroke pressure';
+    # featureStr{31 } = 'mid-stroke area covered';
+    # featureStr{32 } = 'mid-stroke finger orientation';
+    # featureStr{33} = 'change of finger orientation';
+    # featureStr{34} = 'phone orientation';
 
 
 
@@ -685,23 +690,3 @@ def extract_features(swipe: List[FingerEvent]) -> Dict[str, float]:
     # print(final_X)
     return X
 
-def extract_touches(duplicate_end_swipe_generator: List[List[FingerEvent]], count: int) -> Tuple[List[Dict[str, float]], int]:
-    swipes = []
-    swipes: List[Dict[str, float]]
-    for duplicate_end_swipe in duplicate_end_swipe_generator:
-        swipe = duplicate_end_swipe[:-1]
-        if len(swipe) > 5:
-            swipes.append(extract_features(swipe))
-        else:
-            count += 1
-    return swipes, count
-
-if __name__ == "__main__" and False:
-    count = 0
-    result = []
-    for i in range(1, 117):
-        print (i, count)
-        df = pd.read_csv('Tablet/User{}.csv'.format(i))
-        f, count = extract_touches(df, count)
-        result.append(len(f))
-    print (count)

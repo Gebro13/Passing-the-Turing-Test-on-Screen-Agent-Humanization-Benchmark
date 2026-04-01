@@ -6,21 +6,23 @@ from typing import List, Optional, Tuple, Dict, Literal, Iterator
 
 import pandas as pd
 
-from analysis.lib.motionevent_classes import FingerEvent, SessionType
+from analysis.lib.motionevent_classes import FingerEvent, SingularActionType, SessionType
 from analysis.lib.gesture_log_reader_utils import filtered_gesture_generator_from_files
+from analysis.lib.feature_library import startT_us, endT_us
+from analysis.processing.fit_effort_provider import tap as fit_effort_provider_tap
 import random
 
 def null_object_warning() -> None:
     print("Null item detected. These guards are useful after all.")
 
-def _gesture_start_end_us(gesture: List[FingerEvent]) -> Tuple[int, int]:
+# def _deprecated_gesture_start_end_us(gesture: SingularActionType) -> Tuple[int, int]:
     """Return (start_us, end_us) for a gesture, ignoring events without timestamps.
-    Removes the artificially appended disappearing point if present (last point),
+    ~~Removes the artificially appended disappearing point if present (last point),~~ HACK why does this function edit the input? and keeps taps by not enforcing a minimum length filter.
     and keeps taps by not enforcing a minimum length filter.
     """
-    return gesture[0].timestamp_us, gesture[-1].timestamp_us
+#     return startT_us(gesture), endT_us(gesture)
 
-def filter_null(gesture: List[FingerEvent]) -> Optional[List[FingerEvent]]:
+def filter_null(gesture: SingularActionType) -> Optional[SingularActionType]:
     """currently an identity function."""
     return gesture # actually nothing needs to be done
 
@@ -47,16 +49,16 @@ def fake_timestamps_between_start_and_end(start_us: int, end_us: int, target_int
         timestamps.append(timestamp + start_us)
     return timestamps
 
-def faking_intervals_between_gestures(gesture_generator: List[List[FingerEvent]], target_expected_interval_us: int, fake_method: Literal["ghost_operation"] = "ghost_operation") -> List[List[FingerEvent]]:
+def faking_intervals_between_gestures(gesture_generator: List[SingularActionType], target_expected_interval_us: int, fake_method: Literal["ghost_operation"] = "ghost_operation") -> List[SingularActionType]:
     """Given a gesture list, return a new list with faked intervals between them.
     Each gesture's timestamps are shifted such that there is `interval_us` microseconds
     between the end of one gesture and the start of the next.
     """
-    result: List[List[FingerEvent]] = []
+    result: List[SingularActionType] = []
     gestures = gesture_generator
     if (len(gestures) == 0):
         return []
-    start_ends: List[Tuple[int, int]] = [_gesture_start_end_us(gesture) for gesture in gestures]
+    start_ends: List[Tuple[int, int]] = [(startT_us(gesture), endT_us(gesture)) for gesture in gestures]
     result.append(gestures[0])
     for i in range(1, len(start_ends)):
         prev_end = start_ends[i - 1][1]
@@ -65,9 +67,10 @@ def faking_intervals_between_gestures(gesture_generator: List[List[FingerEvent]]
 
         time_stamp_list = fake_timestamps_between_start_and_end(prev_end, current_start, target_expected_interval_us)
 
-        for time_stamp in time_stamp_list:
-            result.append([FingerEvent(timestamp_us=time_stamp, x=None, y=None),
-                           FingerEvent(timestamp_us=time_stamp + 11000, x=None, y=None)])  # fill in x, y not appropriately because it has no meaning here 
+        if fake_method == "ghost_operation":
+            for time_stamp in time_stamp_list:
+                temp_action = fit_effort_provider_tap(None, None, time_stamp, 11000) # fill in x, y not appropriately because it has no meaning here 
+                result.append(temp_action)  
         result.append(gestures[i])
     return result
     
@@ -87,7 +90,7 @@ def build_intervals_dataframe(filtered_gesture_generator: List[Tuple[str, List[S
         for session_timestamp, gestures in session_generator:
             prev_end_us: Optional[int] = None
             for gesture in gestures:
-                start_us, end_us = _gesture_start_end_us(gesture)
+                start_us, end_us = startT_us(gesture), endT_us(gesture)
                 if start_us is None or end_us is None:
                     null_object_warning()
                     continue

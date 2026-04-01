@@ -6,33 +6,21 @@ from typing import List, Optional, Tuple, Dict
 
 import pandas as pd
 
-from analysis.lib.motionevent_classes import FingerEvent
-from analysis.lib.gesture_log_reader_utils import filtered_gesture_generator_from_files_no_timestamp
+from analysis.lib.motionevent_classes import FingerEvent, SingularActionType
+from analysis.lib.gesture_log_reader_utils import filtered_gesture_generator_from_files_no_timestamp, null_object_warning
+from analysis.lib.feature_library import startT_us, endT_us
+from analysis.processing.judge_library import is_tap
 from functools import partial
 
-def null_object_warning() -> None:
-    print("Null item detected. These guards are useful after all.")
 
-def _gesture_start_end_us(gesture: List[FingerEvent]) -> Tuple[int, int]:
-    """Return (start_us, end_us) for a gesture, ignoring events without timestamps.
-    Removes the artificially appended disappearing point if present (last point),
-    and keeps taps by not enforcing a minimum length filter.
-    """
-    return gesture[0].timestamp_us, gesture[-1].timestamp_us
-
-def is_tap(gesture: List[FingerEvent], tap_len_max: int = 5) -> bool:
-    """Check if a gesture is a tap, defined as length <= tap_len_max."""
-    return len(gesture) <= tap_len_max
-
-
-def leave_taps(gesture: List[FingerEvent], tap_len_max: int = 5) -> Optional[List[FingerEvent]]: 
+def leave_taps(gesture: SingularActionType) -> Optional[SingularActionType]: 
     """Leave only taps, defined as gestures with length <= tap_len_max. Does not remove last point."""
-    if (is_tap(gesture, tap_len_max=tap_len_max)):
+    if (is_tap(gesture)):
         return gesture # actually nothing needs to be done
     else:
         return None
 
-def build_durations_dataframe(filtered_gesture_generator: List[Tuple[str, List[List[FingerEvent]]]]) -> pd.DataFrame:
+def build_durations_dataframe(filtered_gesture_generator: List[Tuple[str, List[SingularActionType]]]) -> pd.DataFrame:
     """For each log in logs_inf.csv, compute time_duration_us between consecutive gestures.
 
     - time_duration_us = start_time_us(current_gesture) - end_time_us(previous_gesture)
@@ -43,7 +31,7 @@ def build_durations_dataframe(filtered_gesture_generator: List[Tuple[str, List[L
 
     for label, gesture_iterator in filtered_gesture_generator:
         for gesture in gesture_iterator:
-            start_us, end_us = _gesture_start_end_us(gesture)
+            start_us, end_us = startT_us(gesture), endT_us(gesture)
             dt = end_us - start_us
             rows.append({"type": label, "duration_us": int(dt)})
     if not rows:
@@ -64,6 +52,7 @@ def main() -> None:
     logs_dir = Path(args.logs_dir)
 
     df_idx = pd.read_csv(logs_index_csv)
+    raise NotImplementedError("Previously the len_max is 3. Now it is removed from the api for unity.")
     filtered_gesture_generator = filtered_gesture_generator_from_files_no_timestamp(df_idx=df_idx, logs_dir=logs_dir, filtering_and_modification_function=partial(leave_taps, tap_len_max=3))
 
     df = build_durations_dataframe(filtered_gesture_generator)

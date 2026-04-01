@@ -1,15 +1,28 @@
 # The goal is to provide a class that can yield swipes according to the (x1, y1) -> (x2, y2) requirement.
 
-from analysis.lib.motionevent_classes import FingerEvent
+from analysis.lib.motionevent_classes import FingerEvent, SingularActionType
+from analysis.lib.feature_library import euclidean_distance, startX, startY, endX, endY
 from typing import List, Tuple
-def euclidean_distance(xy1: Tuple[float, float], xy2: Tuple[float, float]) -> float:
-    return abs(complex(*xy1) - complex(*xy2))
 import numpy as np
 import pickle
 import numpy.typing as npt
 from scipy.interpolate import splrep, splev
 
-def bot_line_fit(x1: int, y1: int, x2: int, y2: int, duration_us: int, neighbor_time_delta_us: float) -> List[FingerEvent]:
+def tap(x: int, y: int, start_us: int, duration_us: int) -> SingularActionType:
+    """
+        a primitive tap that tries to align with adb_wrapper.
+    """
+    return [
+        FingerEvent(timestamp_us=start_us, x=x, y=y),
+        FingerEvent(timestamp_us=start_us + duration_us, x=x, y=y)
+    ]
+
+
+def bot_line_fit(x1: int, y1: int, x2: int, y2: int, duration_us: int, neighbor_time_delta_us: float, end_upfinger_time_us: int) -> SingularActionType:
+    """
+        TODO compare with app logs to see what really happens for an original bot swipe. 
+    """
+    
     trace: List[FingerEvent] = []
     steps = int(duration_us / neighbor_time_delta_us)  # convert ms to us
     for i in range(steps + 1):
@@ -17,28 +30,33 @@ def bot_line_fit(x1: int, y1: int, x2: int, y2: int, duration_us: int, neighbor_
         x = int(x1 + (x2 - x1) * i / steps)
         y = int(y1 + (y2 - y1) * i / steps)
         trace.append(FingerEvent(timestamp_us=t, x=x, y=y))
+
+    # TODO what really is this time us?
+    last_time_us = trace[-1].timestamp_us
+    trace.append(FingerEvent(timestamp_us=last_time_us + end_upfinger_time_us, x=x2, y=y2))
+
     return trace
 
-def extract_exact_swipe_batch(label: str, swipe_file_generator: List[Tuple[str, List[List[FingerEvent]]]]) -> List[List[FingerEvent]]:
+def extract_exact_swipe_batch(label: str, swipe_file_generator: List[Tuple[str, List[SingularActionType]]]) -> List[SingularActionType]:
     # actually somewhat like draw_motion_event_multi_file.chain_gesture_iterators
-    swipe_batches = []
+    swipe_batches: List[SingularActionType] = []
     for file_label, gesture_generator in swipe_file_generator:
         if file_label == label:
             swipe_batches.extend(gesture_generator)
     return swipe_batches
 
-def calculated_distance_to_required(swipe_batches: List[List[FingerEvent]], x1: int, y1: int, x2: int, y2: int) -> Tuple[List[float], List[List[FingerEvent]]]:
-    fitted_batches: List[List[FingerEvent]] = []
+def calculated_distance_to_required(swipe_batches: List[SingularActionType], x1: int, y1: int, x2: int, y2: int) -> Tuple[List[float], List[SingularActionType]]:
+    fitted_batches: List[SingularActionType] = []
     distances: List[float] = []
     for swipe in swipe_batches:
         target_displacement_vector = (x2 - x1, y2 - y1)
-        current_displacement_vector = (swipe[-1].x - swipe[0].x, swipe[-1].y - swipe[0].y)
-        current_distance = euclidean_distance(current_displacement_vector, target_displacement_vector)
+        current_displacement_vector = (endX(swipe) - startX(swipe), endY(swipe) - startY(swipe))
+        current_distance = euclidean_distance(*current_displacement_vector, *target_displacement_vector)
         distances.append(current_distance)
         fitted_batches.append(swipe)
     return distances, fitted_batches
 
-def sample_from_softmax_inv_distance(distances: List[float], fitted_batches: List[List[FingerEvent]], softmax_temperature: float) -> List[FingerEvent]:
+def sample_from_softmax_inv_distance(distances: List[float], fitted_batches: List[SingularActionType], softmax_temperature: float) -> SingularActionType:
     """
         softmax_temperature between (0, +inf)
     """
@@ -50,7 +68,7 @@ def sample_from_softmax_inv_distance(distances: List[float], fitted_batches: Lis
     sampled_indices = np.random.choice(len(fitted_batches), size=1, p=probabilities).item()
     return fitted_batches[sampled_indices]
 
-def drag_and_fit(x1: int, y1: int, x2: int, y2: int, original_swipe: List[FingerEvent]) -> List[FingerEvent]:
+def drag_and_fit(x1: int, y1: int, x2: int, y2: int, original_swipe: SingularActionType) -> SingularActionType:
     # use scale and rotation transformation to transform original swipe to fit final swipe
 
     target_complex = complex(x2 - x1, y2 - y1)
@@ -58,7 +76,7 @@ def drag_and_fit(x1: int, y1: int, x2: int, y2: int, original_swipe: List[Finger
     rotary_transformation = target_complex / original_complex
 
     # Apply the transformation
-    transformed_swipe = []
+    transformed_swipe: List[FingerEvent] = []
     for event in original_swipe:
         original_now_offset = complex(event.x - original_swipe[0].x, event.y - original_swipe[0].y)
         transformed_offset = original_now_offset * rotary_transformation
@@ -69,28 +87,30 @@ def drag_and_fit(x1: int, y1: int, x2: int, y2: int, original_swipe: List[Finger
     return transformed_swipe
 
 class FitEffortProvider:
-    def __init__(self, swipe_batches: List[List[FingerEvent]]):
+    def __init__(self, swipe_batches: List[SingularActionType]):
         self.swipe_batches = swipe_batches
 
     def dump_batches(self, name: str = "swipe_data.pkl") -> None:
         with open(name, "wb") as f:
             pickle.dump(self.swipe_batches, f)
 
-    def fit(self, x1: int, y1: int, x2: int, y2: int) -> List[FingerEvent]:
+    def fit(self, x1: int, y1: int, x2: int, y2: int) -> SingularActionType:
         """sample and fit a good swipe"""
         distances, obtained_batches = calculated_distance_to_required(self.swipe_batches, x1, y1, x2, y2)
         sampled_swipe = sample_from_softmax_inv_distance(distances, obtained_batches, softmax_temperature=100.0)
         fitted_swipe = drag_and_fit(x1, y1, x2, y2, sampled_swipe)
         return fitted_swipe
 
-    def humanity_disturbance(self, original_swipe: List[FingerEvent]) -> List[FingerEvent]:
+    def humanity_disturbance(self, original_swipe: SingularActionType) -> SingularActionType:
         """add some humanity disturbance to the original swipe(having no endpoints), which only takes into account its starting (x, y) and ending (x, y)"""
         x1, y1 = original_swipe[0].x, original_swipe[0].y
         x2, y2 = original_swipe[-1].x, original_swipe[-1].y
         return self.fit(x1, y1, x2, y2)
 
 
-def b_spline_faker(trace: List[FingerEvent], neighbor_time_delta_us: float) -> List[FingerEvent]:
+def b_spline_faker(trace: SingularActionType, neighbor_time_delta_us: float) -> SingularActionType:
+    # TODO what to do about the vanishing point
+
     # Implement B-spline fitting and noise addition here
     # add b-spline noise to t, x, y
     # collect original arrays

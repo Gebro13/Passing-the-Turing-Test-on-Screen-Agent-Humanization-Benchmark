@@ -11,7 +11,7 @@ import matplotlib.pyplot as plt
 from typing import Callable, List, Dict, Optional, Tuple, TypedDict, Union, Set
 import numpy.typing as npt
 import argparse
-from analysis.lib.motionevent_classes import FingerEvent
+from analysis.lib.motionevent_classes import SingularActionType
 from analysis.processing.extract_feature_of_swipes import build_features_dataframe
 from sklearn.feature_selection import mutual_info_classif
 
@@ -737,8 +737,8 @@ def calculate_svm_and_xgboost(features_csv: pd.DataFrame, pos_label: str, neg_la
 
 
 def make_feature_and_learner_table(task_cluster_id: int, method_name: str, 
-                pos_iterator: Tuple[str, List[List[FingerEvent]]], 
-                neg_iterator: Tuple[str, List[List[FingerEvent]]]) -> pd.DataFrame:
+                pos_iterator: Tuple[str, List[SingularActionType]], 
+                neg_iterator: Tuple[str, List[SingularActionType]]) -> pd.DataFrame:
     result_csv = pd.DataFrame()
 
     features_csv = build_features_dataframe([pos_iterator, neg_iterator])
@@ -760,8 +760,8 @@ def make_feature_and_learner_table(task_cluster_id: int, method_name: str,
 
 
 def make_feature_and_learner_table_but_acc(task_cluster_id: int, method_name: str, 
-                pos_iterator: Tuple[str, List[List[FingerEvent]]], 
-                neg_iterator: Tuple[str, List[List[FingerEvent]]],
+                pos_iterator: Tuple[str, List[SingularActionType]], 
+                neg_iterator: Tuple[str, List[SingularActionType]],
                 acc_obtain_function: Callable[[pd.DataFrame, str, str], Tuple[pd.DataFrame, Dict[str, ThresholdPosterior]]]
                 ) -> Tuple[pd.DataFrame, sklearn.pipeline.Pipeline, XGBClassifier]:
     result_csv = pd.DataFrame()
@@ -786,7 +786,7 @@ def make_feature_and_learner_table_but_acc(task_cluster_id: int, method_name: st
         raise ValueError("Resulting ACC dataframe is empty.")
 
 
-def plot_acc_increase_as_more_feature_used(task_cluster_id: int, method_name: str, pos_iterator: Tuple[str, List[List[FingerEvent]]], neg_iterator: Tuple[str, List[List[FingerEvent]]]) -> pd.DataFrame:
+def plot_acc_increase_as_more_feature_used(task_cluster_id: int, method_name: str, pos_iterator: Tuple[str, List[SingularActionType]], neg_iterator: Tuple[str, List[SingularActionType]]) -> pd.DataFrame:
     result_csv = pd.DataFrame()
 
     features_csv = build_features_dataframe([pos_iterator, neg_iterator])
@@ -807,8 +807,8 @@ def plot_acc_increase_as_more_feature_used(task_cluster_id: int, method_name: st
     return result_csv
 
 def make_feature_table_but_mutual_information_binary(task_cluster_id: int, method_name: str, 
-                pos_iterator: Tuple[str, List[List[FingerEvent]]], 
-                neg_iterator: Tuple[str, List[List[FingerEvent]]]) -> pd.DataFrame:
+                pos_iterator: Tuple[str, List[SingularActionType]], 
+                neg_iterator: Tuple[str, List[SingularActionType]]) -> pd.DataFrame:
     features_csv = build_features_dataframe([pos_iterator, neg_iterator])
     filtered = filter_df(df=features_csv, pos_label=pos_iterator[0], neg_label=neg_iterator[0])
     res = calculate_mutual_information_binary(filtered, pos_label=pos_iterator[0], neg_label=neg_iterator[0])
@@ -823,7 +823,7 @@ def make_feature_table_but_mutual_information_binary(task_cluster_id: int, metho
 
 def make_feature_table_but_mutual_information_multiple(
     task_cluster_id: int, 
-    type_and_data_iterators: List[Tuple[str, List[List[FingerEvent]]]],
+    type_and_data_iterators: List[Tuple[str, List[SingularActionType]]],
     output_relative_importance: bool = True,
     ) -> pd.DataFrame:
 

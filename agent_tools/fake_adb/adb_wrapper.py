@@ -36,8 +36,9 @@ assert PROJ_FOLDER / "agent_tools" / "fake_adb" == SELF_FOLDER, "The script's lo
 try:
     
     sys.path.append(str(PROJ_FOLDER)) # very necessary since we may call this file from other directories
-    from analysis.lib.motionevent_classes import GotEvent, FingerEvent
+    from analysis.lib.motionevent_classes import GotEvent, FingerEvent, SingularActionType, is_integral
     from analysis.processing.fit_effort_provider import FitEffortProvider, bot_line_fit
+    from analysis.processing.fit_effort_provider import tap as fit_effort_provider_tap
 except ImportError as e:
     print(f"Wrapper Error: Could not import dependencies: {e}", file=sys.stderr)
     sys.exit(1)
@@ -133,23 +134,24 @@ class MotionGenerator:
             try:
                 pkl_path = PROJ_FOLDER / "analysis" / "processing" / "swipe_data.pkl"
                 with open(pkl_path, "rb") as f:
-                    pickled: List[List[FingerEvent]] = pickle.load(f)
+                    pickled: List[SingularActionType] = pickle.load(f)
                     MotionGenerator.static_fit_effort_provider = FitEffortProvider(pickled)
             except FileNotFoundError as e:
                 print(f"Warning: Could not find swipe_data.pkl: {e}", file=sys.stderr)
 
     @staticmethod
-    def generate_swipe_trace(x1, y1, x2, y2, duration_us = 500 * 1000, neighbor_time_delta_us: int = GLOBAL_EVENT_INTERVAL_US, fake_human: bool = False, verbose: bool = False) -> List[FingerEvent]:
+    def generate_swipe_trace(x1, y1, x2, y2, duration_us = 500 * 1000, end_upfinger_time_us: int = 50000, neighbor_time_delta_us: int = GLOBAL_EVENT_INTERVAL_US, fake_human: bool = False, verbose: bool = False) -> SingularActionType:
         """
         Generate a list of (time_offset_us, x, y) for a linear swipe.
+        If fake_human is True, only x1, y1, x2, y2 will be used.
+        
         duration_ms: total swipe time in milliseconds
-        steps: number of intermediate “dots” (so total points = steps+1)
         """
         
         if fake_human and (MotionGenerator.static_fit_effort_provider is not None):
             trace = MotionGenerator.static_fit_effort_provider.fit(x1, y1, x2, y2)
         else: 
-            trace = bot_line_fit(x1, y1, x2, y2, duration_us, neighbor_time_delta_us)
+            trace = bot_line_fit(x1, y1, x2, y2, duration_us, neighbor_time_delta_us, end_upfinger_time_us)
         return trace
 
     # https://www.kernel.org/doc/html/latest/input/multi-touch-protocol.html
@@ -189,6 +191,10 @@ class MotionGenerator:
         
         with open(file_name, "w") as f:
             for event in event_list:
+                
+                if tosend_device != event.device:
+                    raise ValueError(f"Event device {event.device} does not match the target device {tosend_device}. This may cause the event replay to fail, please check the event generation logic.")
+
                 # convert the event to a string
                 # be aware of precision loses, so we construct the timestamp not by division but by modulo.
                 lower_6_digits = event.timestamp_us % 1000000
@@ -217,10 +223,16 @@ class MotionGenerator:
             sendc(f"{adb_path} shell rm /sdcard/{file_name}")
 
     @staticmethod
-    def swipe_to_event_trace(trace: List[FingerEvent], end_upfinger_time_us = 50000, evdev=GLOBAL_TOUCH_DEVICE, fake_pressure=False) -> List[GotEvent]:
+    def swipe_to_event_trace(trace: SingularActionType, evdev=GLOBAL_TOUCH_DEVICE) -> List[GotEvent]:
         """
         Generate a Type-B swipe event sequence.
         Returns the generated event: list of `GotEvent`s.
+
+        Theoretically, the pressure information should be already existent in SingularActionType, so this function don't implement any presure faking.    
+        Since we don't have device that collect pressure/size/etc, this converter only implements the basic x, y, timestamp information.  
+        Since the app side MotionEvent object actually contain the device information, we should have omitted the evdev parameter; however, we keep it here for convenience.
+        
+
 
         Params:
         duration_ms  total swipe duration,
@@ -231,7 +243,10 @@ class MotionGenerator:
         You can log or inspect the returned trace to see each "dot"'s timestamp.
         """
 
-        # … inside your swipe() function replace the placeholder with:
+        if not is_integral(trace):
+            raise ValueError(f"Something wrong with the trace: {trace}")
+
+        # … inside your swipe() function replace the placeholder with: ??? HACK what does this mean
 
         # --- touch down (begin contact) ---
         # assign a tracking ID 0
@@ -248,7 +263,7 @@ class MotionGenerator:
         ]
 
         # --- move events ---
-        for finger_event in trace[1:]:
+        for finger_event in trace[1:-1]:
             # add the event to the list
             event_list += [
                 GotEvent(timestamp_us=finger_event.timestamp_us, device=evdev, type=EV_ABS, code=ABS_MT_POSITION_X, value=finger_event.x),
@@ -256,8 +271,9 @@ class MotionGenerator:
                 GotEvent(timestamp_us=finger_event.timestamp_us, device=evdev, type=EV_SYN, code=SYN_REPORT, value=0)
             ]
 
-        finger_uplift_time = trace[-1].timestamp_us + end_upfinger_time_us  # add a small delay after the last move; see the docs for details
+        finger_uplift_time = trace[-1].timestamp_us
 
+        # intentionally ignore last point's x&y
         event_list += [
             GotEvent(timestamp_us=finger_uplift_time, device=evdev, type=EV_ABS, code=ABS_MT_TRACKING_ID, value=0xFFFFFFFF),
             GotEvent(timestamp_us=finger_uplift_time, device=evdev, type=EV_KEY, code=BTN_TOUCH, value=UP),
@@ -278,8 +294,8 @@ class MotionGenerator:
         fake_pressure: if True, injects fake pressure values (not always needed or supported by device).
         """
         MotionGenerator.init_provider()
-        trace_abstract_finger = MotionGenerator.generate_swipe_trace(x1, y1, x2, y2, duration_ms * 1000, neighbor_time_delta_us=GLOBAL_EVENT_INTERVAL_US, fake_human=fake_human)
-        trace_gotevent = MotionGenerator.swipe_to_event_trace(trace=trace_abstract_finger, end_upfinger_time_us=50000, evdev=evdev, fake_pressure=fake_pressure)
+        trace_abstract_finger = MotionGenerator.generate_swipe_trace(x1, y1, x2, y2, duration_ms * 1000, end_upfinger_time_us=50000, neighbor_time_delta_us=GLOBAL_EVENT_INTERVAL_US, fake_human=fake_human)
+        trace_gotevent = MotionGenerator.swipe_to_event_trace(trace=trace_abstract_finger, evdev=evdev)
         MotionGenerator.flush_event_sequence(adb_path, evdev, trace_gotevent)
 
     @staticmethod
@@ -291,11 +307,8 @@ class MotionGenerator:
         evdev: the device node for your touchscreen (may differ across devices)
         fake_pressure: if True, injects fake pressure values (not always needed or supported by device).
         """
-        MotionGenerator.init_provider()
-        trace_abstract_finger = [
-            FingerEvent(timestamp_us=0, x=x, y=y),
-        ]
-        trace_gotevent = MotionGenerator.swipe_to_event_trace(trace=trace_abstract_finger, end_upfinger_time_us=duration_us, evdev=evdev, fake_pressure=fake_pressure)
+        trace_abstract_finger = fit_effort_provider_tap(x, y, 0, duration_us)
+        trace_gotevent = MotionGenerator.swipe_to_event_trace(trace=trace_abstract_finger, evdev=evdev)
         MotionGenerator.flush_event_sequence(adb_path, evdev, trace_gotevent)
 
 
@@ -320,9 +333,10 @@ class MotionGenerator:
             FingerEvent(timestamp_us=33000, x=start_x, y=start_y),
             FingerEvent(timestamp_us=44000, x=start_x + 200, y=start_y),
             FingerEvent(timestamp_us=55000, x=start_x, y=start_y),
+            FingerEvent(timestamp_us=55000 + 10000, x=start_x, y=start_y),
         ]
 
-        trace_gotevent = MotionGenerator.swipe_to_event_trace(trace=fake_action_trace, end_upfinger_time_us=10000, evdev=evdev, fake_pressure=False)
+        trace_gotevent = MotionGenerator.swipe_to_event_trace(trace=fake_action_trace, evdev=evdev)
         MotionGenerator.flush_event_sequence(adb_path, evdev, trace_gotevent)
 
     @staticmethod
@@ -347,9 +361,10 @@ class MotionGenerator:
             FingerEvent(timestamp_us=33000, x=start_x + side, y=start_y),
             FingerEvent(timestamp_us=55000, x=start_x, y=start_y),
             FingerEvent(timestamp_us=66000, x=start_x, y=start_y),
+            FingerEvent(timestamp_us=66000 + 12000, x=start_x, y=start_y),
         ]
 
-        trace_gotevent = MotionGenerator.swipe_to_event_trace(trace=fake_action_trace, end_upfinger_time_us=12000, evdev=evdev, fake_pressure=False)
+        trace_gotevent = MotionGenerator.swipe_to_event_trace(trace=fake_action_trace, evdev=evdev)
         MotionGenerator.flush_event_sequence(adb_path, evdev, trace_gotevent)
 
     tap_position_record_file = SELF_FOLDER / "tap_position_record.txt" # PASTBUG: was relative path, causing issues when running from other directories e.g. mobile-agent-e
@@ -407,7 +422,10 @@ class MotionGenerator:
             fake_action_trace.append(FingerEvent(timestamp_us=timestamp_us, x=x, y=y))
         for i in range(5):
             fake_action_trace.append(FingerEvent(timestamp_us=time + (i+1)*GLOBAL_EVENT_INTERVAL_US, x=center_x + radius, y=center_y))            
-        trace_gotevent = MotionGenerator.swipe_to_event_trace(trace=fake_action_trace, end_upfinger_time_us=15000, evdev=evdev, fake_pressure=False)
+
+        last_time_us = fake_action_trace[-1].timestamp_us
+        fake_action_trace.append(FingerEvent(timestamp_us=last_time_us + 15000, x=center_x + radius, y=center_y))
+        trace_gotevent = MotionGenerator.swipe_to_event_trace(trace=fake_action_trace, evdev=evdev)
         MotionGenerator.flush_event_sequence(adb_path, evdev, trace_gotevent)
 # --- Action Functions ---
 

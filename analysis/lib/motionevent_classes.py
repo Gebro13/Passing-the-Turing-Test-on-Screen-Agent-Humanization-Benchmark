@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from typing import List, Tuple
+from typing_extensions import TypeAlias
 
 @dataclass
 class GotEvent:
@@ -15,4 +16,28 @@ class FingerEvent:
     x: int          # x coordinate in pixels
     y: int          # y coordinate in pixels
 
-SessionType = Tuple[str, List[List[FingerEvent]]]  # (session_id, list of GotEvent)
+SingularActionType: TypeAlias = List[FingerEvent]  # list of Events for a single action (e.g., a tap, swipe, etc.)
+
+END_SAMPLE_XY_IDX = -2 # the index of the last point that has valid x, y coordinates. This is used to handle the vanishing point issue where the last point may have None for x and y.
+
+# Target: output write SingularActionType. input args: if write SingularActionType and the function require unwrapping the class, then better there will be a List[FingerEvent] inside the function that can trigger an error.
+
+def is_integral(trace: SingularActionType) -> bool:
+    """
+        check if all events in the trace have integral x and y values.  
+        If less than 2 events, raise AssertionError.
+    """
+    # 
+    for event in trace:
+        if not isinstance(event.x, int) or not isinstance(event.y, int) or not isinstance(event.timestamp_us, int):
+            return False
+    
+    # assert that x and y same for [-2] and [-1]
+    assert len(trace) >= 2, "Trace must have at least 2 events to check for integral upfinger event"
+    if trace[-1].x != trace[-2].x or trace[-1].y != trace[-2].y:
+        return False
+
+    return True
+
+
+SessionType = Tuple[str, List[SingularActionType]]  # (session_id, list of Events)

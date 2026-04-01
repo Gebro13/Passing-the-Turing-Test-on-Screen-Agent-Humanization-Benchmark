@@ -1,13 +1,12 @@
 # (540, 960) -> (540, 192)
 
-from analysis.lib.motionevent_classes import FingerEvent
+from analysis.lib.motionevent_classes import SingularActionType
 from analysis.lib.feature_library import extract_features
 from analysis.plotting.draw_motion_event2 import throw_away_timestamp, plot_gestures
 import numpy as np
 from typing import List, Tuple
 from analysis.processing.fit_effort_provider import extract_exact_swipe_batch, FitEffortProvider
 from analysis.lib.gesture_log_reader_utils import filtered_gesture_generator_from_files_no_timestamp
-from extract_feature_of_swipes import cleanse_into_swipe
 from pathlib import Path
 
 ## plot the statistics into histogram
@@ -29,7 +28,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     counts: int = args.counts
-
+    raise NotImplementedError("cleanse_into_swipe is deprecated. As it is shown, the final swipe pkl did not have the vanishing point.")
     example_swipe_batch = extract_exact_swipe_batch(
         args.source_label,
         filtered_gesture_generator_from_files_no_timestamp(
@@ -47,7 +46,7 @@ if __name__ == "__main__":
     humanize_sample_provider.dump_batches()
 
     target_swipe = ((540, 960), (540, 192))
-    swipes: List[List[FingerEvent]] = [
+    swipes: List[SingularActionType] = [
         humanize_sample_provider.fit(target_swipe[0][0], target_swipe[0][1], target_swipe[1][0], target_swipe[1][1])
         # controller.MotionGenerator.generate_swipe_trace(540, 960, 540, 192, fake_human=True)
         for _ii in range(counts)

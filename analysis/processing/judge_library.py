@@ -3,33 +3,31 @@ from scipy.interpolate import make_interp_spline
 from scipy.signal import savgol_filter
 from scipy.stats import norm, kstest
 from sklearn.metrics import mean_squared_error
-from analysis.lib.motionevent_classes import FingerEvent
+from analysis.lib.motionevent_classes import SingularActionType
 from typing import Dict, Tuple, TypedDict, List
 
-from analysis.lib.gesture_log_reader_utils import SessionType
-from analysis.processing.tap_duration_extract import is_tap
+from analysis.lib.gesture_log_reader_utils import FingerEvent, SessionType
+from analysis.lib.feature_library import directionless_displacement, startT_us, endT_us, pixel_length
 from analysis.processing.calculate_roc_auc_from_feature import get_numeric_feature_column_names, get_feature_columns, ThresholdPosterior
 import numpy as np
 from sklearn.pipeline import Pipeline
 from xgboost import XGBClassifier
 from analysis.processing.extract_feature_of_swipes import build_features_dataframe
 
-def swipe_judger(single_finger_trace: List[FingerEvent]) -> bool:
-    """
-    Judge whether the trace is a tap or a swipe.
-    """
-    coords = np.array([(e.x, e.y) for e in single_finger_trace])
-    start = coords[0]
-    end = coords[-1]
 
-    vec = end - start
-    # compute total displacement between start and end
-    norm = np.linalg.norm(vec)
+def is_tap(gesture: SingularActionType, tap_len_max: int = 5) -> bool:
+    """Check if a gesture is a tap, defined as length <= tap_len_max."""
+    return pixel_length(gesture) <= tap_len_max
 
+def swipe_judger(single_finger_trace: SingularActionType) -> bool:
+    """
+    Judge whether the trace is a swipe.   
+    :return: True if it's a swipe, False if it's a tap. This is a very naive judger that only looks at the displacement between the start and end points. It can be easily tricked by an agent that simulates a tap with a very short swipe, but it serves as a simple baseline.
+    """
     TAP_THRESHOLD = 30.0     # pixels
 
     # if there is almost no movement, it's a tap
-    if norm < TAP_THRESHOLD:
+    if directionless_displacement(single_finger_trace) < TAP_THRESHOLD:
         return False
     return True
 
@@ -282,14 +280,14 @@ class UltimateClassifier():
         if (len(session) == 0):
             return []
         
-        last_end_time = session[0][0].timestamp_us # used when idx == 1
+        last_end_time = startT_us(session[0]) # used when idx == 1
 
         results = []
 
         for idx, action in enumerate(session):
 
             if idx > 0:
-                this_begin_time = action[0].timestamp_us
+                this_begin_time = startT_us(action)
                 
                 # predict and update interval
                 interval_log_odds = get_log_odds_with_threshold_posterior(
@@ -304,7 +302,7 @@ class UltimateClassifier():
             action_type = 'tap' if is_tap(action) else 'swipe'
             # get features
             if action_type == 'tap':
-                duration_us = action[-1].timestamp_us - action[0].timestamp_us
+                duration_us = endT_us(action) - startT_us(action)
                 tap_log_odds = get_log_odds_with_threshold_posterior(
                     duration_us,
                     self.tap_us_classifier[task_cluster_id]
@@ -330,7 +328,7 @@ class UltimateClassifier():
             else:
                 raise ValueError(f"Unknown action type: {action_type}")
             
-            this_end_time = action[-1].timestamp_us
+            this_end_time = endT_us(action)
             results.append((this_end_time, cumulant_log_odds))
             last_end_time = this_end_time
 
