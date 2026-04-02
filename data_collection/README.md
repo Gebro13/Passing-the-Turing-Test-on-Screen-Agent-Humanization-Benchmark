@@ -53,26 +53,7 @@ Some functionality requires metadata files that are NOT in this online repositor
 
 ### 1. Install Motion Logger App
 
-The motion logger app records sensor data (accelerometer, gyroscope, magnetometer).
-
-**Option A: Compile from source** (recommended for customization):
-```bash
-# Clone the java branch of this repository in another directory
-# Open MyMotionLogger project in Android Studio
-# Build and install to device
-```
-
-**Option B: Use pre-compiled APK**:
-```bash
-adb install MyMotionLogger/app/build/outputs/apk/debug/app-debug.apk
-```
-
-**Configure the app**:
-- Open the app on device
-- Grant all permissions (especially background activity permissions)
-- In Developer Options on device:
-  - Increase "Background process limit" to allow background recording
-  - Add the app to "Apps that can run in background"
+Please refer to [Motion Logger README](MyMotionLogger/README.md) for instructions on installing and configuring the motion logger app, which captures sensor data during interactions.
 
 ### 2. Configure Screen Recording
 

@@ -3,10 +3,51 @@
 This is a logger; it can record finger/button activities when in foreground. 
 It can also record accelerometer, rotation and gyroscope when in foreground/background(note: this may not be possible if api>=28)
 
+
+The motion logger app records sensor data (accelerometer, gyroscope, magnetometer).
+
+
 # Dependency
 
 - Android Studio; I installed it as a side effect using link https://appium.io/docs/en/2.19/quickstart/install/ link
 - an Android phone; read off its api version thru Android Studio.
+
+# Installation
+
+
+**Option A: Compile from source** (recommended for customization):
+```bash
+# Clone the java branch of this repository in another directory
+# Open MyMotionLogger project in Android Studio
+# Build and install to device
+```
+
+**Option B: Use pre-compiled APK**:
+```bash
+adb install app/build/outputs/apk/debug/app-debug.apk
+```
+
+**Configure the app**:
+- Open the app on device
+- Grant all permissions (especially background activity permissions)
+- In Developer Options on device:
+  - Increase "Background process limit" to allow background recording
+  - Add the app to "Apps that can run in background"
+
+# Launching Separately
+
+If you utilize the motion logger standing alone:
+
+```bash
+adb shell rm /sdcard/Android/data/com.example.motionlogger/Files/motion_log.txt # remove old log
+adb shell am start -S com.example.motionlogger/.MainActivity # launch the app
+```
+
+In order to stop recording: 
+```bash
+adb shell am force-stop com.example.motionlogger
+adb pull /sdcard/Android/data/com.example.motionlogger/Files/motion_log.txt {output_sensor_path} # pull the log file to local
+```
 
 
 # Usage

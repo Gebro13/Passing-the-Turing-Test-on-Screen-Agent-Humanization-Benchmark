@@ -161,7 +161,7 @@ def single_trace_generator(adb_getevent_generator: List[str]) -> List[SingularAc
 
         elif button_match is not None:
 
-            # only some error checking
+            # only some error checking. You can delete this elif because it may be nonexistent in a minimal device.
             button_stat = button_match.group(1)
             if button_stat == "DOWN":
                 if (inherited_id == fleeting_id) and (inherited_id != TERMINATION_ID):

@@ -12,11 +12,24 @@ This tool enables agents to:
 
 ## Prerequisites
 
+Use this command to print the api level of your android device, which may be needed later.
+```bash
+adb shell getprop ro.build.version.sdk
+```
+
 ### Dependencies
 
 1. **android-touch-record-replay** binary:
    - Follow instructions at https://github.com/Cartucho/android-touch-record-replay
-   - Binary must be available at `/data/local/tmp/mysendevent-arm64` on your Android device
+   - Binary must be pushed to `/data/local/tmp/mysendevent-arm64` on your Android device.
+   - For self compilation, download ndk from Android Studio's Android SDK - SDK Tools - NDK (Side by side), then run, for example, when you have ndk version 30.0.14904198 installed and your phone's android api level is 25:
+     ```bash
+     ~/Android/Sdk/ndk/30.0.14904198/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android25-clang -static -O2 mysendevent.c -o mysendevent-arm64
+     
+     
+     ~/Android/Sdk/ndk/30.0.14904198/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android25-clang -O2 -Wl,--pack-dyn-relocs=none mysendevent.c -o mysendevent-arm64
+     ```
+
 
 2. **Python Requirements** (from `requirements.txt`):
    ```bash
@@ -65,7 +78,7 @@ Edit `adb_wrapper_config.json`:
 |-------|-------------|---------|
 | `real_adb` | Path to your actual ADB binary | `/home/user/Android/Sdk/platform-tools/adb` |
 | `global_touch_device` | Touch device input path on Android | `/dev/input/event4` |
-| `global_event_interval_us` | Time interval between dots in swipe (microseconds) | `11000` (11ms) |
+| `global_event_interval_us` | Time interval between dots in swipe (microseconds) | `11000` (11ms, about 90Hz) |
 | `global_fake_human` | Enable human-like behavior for single actions (vs bot-like) | `true` or `false` |
 
 **Note**: 
@@ -74,7 +87,7 @@ Edit `adb_wrapper_config.json`:
 adb shell -t -t getevent -lt | grep ABS_MT_POSITION
 ```
 The output will show the device path (e.g., `/dev/input/event4`).
-- The `global_event_interval_us` value may also be device-specific. Find it out by running `adb shell -t -t getevent -lt` on the host, then use your finger to swipe the screen, and check the output for the timestamps. Another method for double-checking: Running the sensor logger `MyMotionLogger` app, then run `adb shell input swipe 100 500 900 500` or use your finger to make a swipe on the blank zone in the sensor logger app, and check the sensorevent log for the timestamps of Motion Events.
+- The `global_event_interval_us` value may also be device-specific. Find it out by running `adb shell -t -t getevent -lt` on the host, then use your finger to swipe the screen, and check the output for the timestamps. 
 
 - The time taken for a non-humanized tap may also be device-specific. Find it out by tapping on the blank zone in the sensor logger app with `adb shell input tap 500 800` and checking the interval between the down event and up event in the sensor logger. Adjust the default 1000us in `do_tap()` if needed.
 
