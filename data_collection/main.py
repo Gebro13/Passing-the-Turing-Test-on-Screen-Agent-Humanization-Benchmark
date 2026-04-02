@@ -19,7 +19,6 @@ import os
 import time
 import data_collection.automations as automations
 
-from datetime import datetime
 
 def assert_equal_paths():
     """
@@ -89,7 +88,7 @@ if __name__ == "__main__":
         basepath.mkdir(parents=True)
     absolute_base_path = basepath.resolve()
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = automations.generate_timestamp()
     output_path = str(basepath / f"gesture_recording_{timestamp}.log")
     output_video = str(basepath / f"screen_recording_{timestamp}.mp4")
     absolute_output_IME_path = str(absolute_base_path / f"IME_event_{timestamp}.txt")

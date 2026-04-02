@@ -1,8 +1,8 @@
 import os
 import sys
 import time
+from datetime import datetime
 from typing import Dict, List, Literal, Optional, Tuple, Callable, TypedDict, Union
-import datetime
 import PIL.Image
 from pathlib import Path
 
@@ -19,11 +19,13 @@ COLLECTION_FOLDER_ABSOLUTE: Path = Path(__file__).resolve().parent
 PROJ_FOLDER_ABSOLUTE: Path = COLLECTION_FOLDER_ABSOLUTE.parent
 FAKE_ADB_PATH_ABSOLUTE: Path = PROJ_FOLDER_ABSOLUTE / "agent_tools" / "fake_adb"
 
+"""
 # assert the running folder is PROJ_FOLDER, otherwise throw error
 if Path.cwd() != PROJ_FOLDER_ABSOLUTE:
     raise NotImplementedError("Please run this script from the project root folder.")
     print(f"Changing working directory from {Path.cwd()} to project folder {PROJ_FOLDER_ABSOLUTE}")
     os.chdir(PROJ_FOLDER_ABSOLUTE)
+"""
 
 if len(sys.path) == 0 or sys.path[0] != str(PROJ_FOLDER_ABSOLUTE):
     sys.path.insert(0, str(PROJ_FOLDER_ABSOLUTE))
@@ -89,19 +91,24 @@ def start_another_data_collection(tmux_session_name: str):
     """
     os.system(f"tmux send-keys -t {tmux_session_name} \"python3 {COLLECTION_FOLDER_ABSOLUTE}/main.py --automatic_switch_app\" Enter")
 
-def halt_data_collection_session(tmux_session_name: str) -> str:
+def generate_timestamp() -> str:
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
+
+def get_timestamp() -> str:
+    with open(TIMESTAMP_RECORDER, "r") as f:
+        timestamp = f.read().strip()
+    return timestamp
+
+def halt_data_collection_session(tmux_session_name: str) -> None:
     """
         condition: phone screen already opened an app in foreground
         result: data collection is halted and tmux prompting; phone can be in any state
         returns: a time stamp of the current data collection session
     """
-    with open(TIMESTAMP_RECORDER, "r") as f:
-        timestamp = f.read().strip()
     for _ in range(4):
         os.system(f"tmux send-keys -t {tmux_session_name} Enter")
         time.sleep(0.3)
     time.sleep(5.0) # wait for data collection to halt completely. Probably have to remove this waiting from legacy scripts.
-    return timestamp
 
 default_data_collection_session_name = "mydadaacollection"
 
@@ -194,24 +201,15 @@ class AgentLauncher(ABC):
         """End the redirection of tmux session output, which also happen to flush the buffer."""
         os.system(f"tmux pipe-pane -t {self.session_name}:0.0")
 
-    def do_an_experiment(self, callable_app_launch: Callable[[], None], experiment_name: str, timeout_seconds: int = 1800) -> str:
+    def do_an_experiment_core(self, experiment_name: str, timestamp: str, timeout_seconds: int = 1800):
         """
-        Do an experiment with the given app launch function and experiment name.
+            Launch the agent until it halts.  
+            Records tmux output; halting condition is either the agent finishes and marks idle, or timeout and we force halt it.
+            Requires the app screen to be prepared i.e. a suitable state for agent to take over.
 
-        :param callable_app_launch: A function that launches the app to be tested; it require phone showing app screen. It clicks open the app and configure it until ready to serve.
-        :param experiment_name: query for agent.
-        :param timeout_seconds: The timeout in seconds.
-        
-        :return: A timestamp string indicating when the experiment was completed. e.g. 20231012_153045
-        :rtype: str
+            returns: the path to the file where the tmux output is saved. The file is named with a random hex to avoid conflicts, and it's the caller's responsibility to move/rename it after this function returns.
         """
-        resume_event.clear()  # halt fake action generation
-        
-        specific.prepare_apps_screen()
-        callable_app_launch()
-        start_another_data_collection(default_data_collection_session_name)
-        time.sleep(20.0)
-        
+
         os.system(f"echo 'launched {self.name} experiment on date ' $(date) >> experiment_log.txt")
         os.system(f"echo \'experiment name: {experiment_name}\' >> experiment_log.txt")
 
@@ -226,10 +224,33 @@ class AgentLauncher(ABC):
         self._block_until_session_is_idle(timeout_seconds=timeout_seconds)
         self._end_tmux_output_redirection()
 
-        timestamp = halt_data_collection_session(default_data_collection_session_name)
+        resume_event.clear()  # halt fake action generation
 
         target_path = PROJ_FOLDER_ABSOLUTE / "logs" /  f"agent_output_{timestamp}.txt"
         os.rename(previous_path, target_path)
+
+
+    def do_an_experiment(self, callable_app_launch: Callable[[], None], experiment_name: str, timeout_seconds: int = 1800) -> str:
+        """
+        Do an experiment with the given app launch function and experiment name.
+        Phone in any state before that.
+
+        :param callable_app_launch: A function that launches the app to be tested; it require phone showing app screen. It clicks open the app and configure it until ready to serve.
+        :param experiment_name: query for agent.
+        :param timeout_seconds: The timeout in seconds.
+        
+        :return: A timestamp string indicating when the experiment was completed. e.g. 20231012_153045
+        :rtype: str
+        """        
+        specific.prepare_apps_screen()
+        callable_app_launch()
+        start_another_data_collection(default_data_collection_session_name)
+        time.sleep(20.0)
+        timestamp = get_timestamp()
+        
+        self.do_an_experiment_core(experiment_name, timestamp, timeout_seconds)
+
+        halt_data_collection_session(default_data_collection_session_name)
 
         return timestamp
 
@@ -440,6 +461,8 @@ try:
                 useless_action_thread = threading.Thread(target=useless_micro_swipe_loop, args=(1.0, 200), daemon=True)
             else:
                 useless_action_thread = threading.Thread(target=run_useless_action_loop_method_2, args=(1.1,), daemon=True)
+
+        resume_event.clear()  # start with fake action generation halted
         useless_action_thread.start()
         input("Press Enter to continue to experiments...")
         print("Continuing to experiments...")
