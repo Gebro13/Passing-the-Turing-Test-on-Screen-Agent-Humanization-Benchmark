@@ -6,12 +6,19 @@ import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
+import android.media.AudioManager;
+import android.media.ToneGenerator;
 import android.os.Bundle;
 import android.os.SystemClock;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputConnection;
+import android.view.inputmethod.InputConnectionWrapper;
 import android.widget.FrameLayout;
 
 import androidx.annotation.Nullable;
@@ -40,6 +47,30 @@ public class MainActivity extends Activity implements SensorEventListener {
     private Sensor stepDetector;
 
 
+    public class LoggingEditText extends androidx.appcompat.widget.AppCompatEditText {
+        public LoggingEditText(Context context) {
+            super(context);
+        }
+
+        @Override
+        public InputConnection onCreateInputConnection(EditorInfo outAttrs) {
+            return new LoggingInputConnection(super.onCreateInputConnection(outAttrs), true);
+        }
+
+        private class LoggingInputConnection extends InputConnectionWrapper {
+            public LoggingInputConnection(InputConnection target, boolean mutable) {
+                super(target, mutable);
+            }
+
+            @Override
+            public boolean commitText(CharSequence text, int newCursorPosition) {
+                logToFile(SystemClock.elapsedRealtimeNanos() + " IME Commit: \"" + text + "\"\n");
+                return super.commitText(text, newCursorPosition);
+            }
+        }
+    }
+
+    private LoggingEditText inputBox;
 
     private FileOutputStream logStream;
 
@@ -49,7 +80,61 @@ public class MainActivity extends Activity implements SensorEventListener {
 
         FrameLayout layout = new FrameLayout(this);
         layout.setBackgroundColor(0xFFFFFFFF); // white background
+
+        // Create the input box
+        inputBox = new LoggingEditText(this);
+        inputBox.setHint("Type here...");
+        inputBox.setFocusable(true);
+        inputBox.setFocusableInTouchMode(true);
+
+
+        // Add to layout
+        layout.addView(inputBox, new FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.WRAP_CONTENT
+        ));
+
         setContentView(layout);
+
+        inputBox.requestFocus(); // may need to remove this line
+
+        // get even more raw events (including multiple key presses)
+        // Add this in onCreate after setting up the inputBox
+        inputBox.setOnKeyListener(new View.OnKeyListener() {
+            @Override  // a KeyEventListener
+            public boolean onKey(View v, int keyCode, KeyEvent event) {
+                // This will catch events before they're processed by the EditText
+                String data = String.format("%d InputBox Key: action=%d keyCode=%d (%s) chars=%s\n",
+                        event.getEventTime(),
+                        event.getAction(),
+                        keyCode,
+                        KeyEvent.keyCodeToString(keyCode),
+                        event.getCharacters());
+                logToFile(data);
+
+                // Return false to let the event continue to the EditText
+                return false;
+            }
+        });
+
+        // a KeyEventListener
+        // Add this in onCreate after setting up the inputBox
+        inputBox.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+                logToFile(SystemClock.elapsedRealtimeNanos() + " Text before change: \"" + s + "\"\n");
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+                logToFile(SystemClock.elapsedRealtimeNanos() + " Text changing: \"" + s + "\"\n");
+            }
+
+            @Override
+            public void afterTextChanged(Editable s) {
+                logToFile(SystemClock.elapsedRealtimeNanos() + " Text after change: \"" + s + "\"\n");
+            }
+        });
 
         try {
             File logFile = new File(getExternalFilesDir(null), "motion_log.txt");
@@ -332,20 +417,44 @@ public class MainActivity extends Activity implements SensorEventListener {
         // Optional: log accuracy changes if needed
     }
 
-    @Override
+    @Override // a KeyEventListener
     public boolean onKeyDown(int keyCode, KeyEvent event) {
-        String data = String.format("%d KeyEvent DOWN: keyCode=%d (%s)\n",
-                event.getEventTime(), keyCode, KeyEvent.keyCodeToString(keyCode));
+        String data = String.format("%d KeyEvent DOWN: keyCode=%d (%s) repeat=%d meta=%d\n",
+                event.getEventTime(),
+                keyCode,
+                KeyEvent.keyCodeToString(keyCode),
+                event.getRepeatCount(),
+                event.getMetaState());
         logToFile(data);
+
+        // Let the system handle it normally too
         return super.onKeyDown(keyCode, event);
     }
 
-    @Override
+    @Override // a KeyEventListener
     public boolean onKeyUp(int keyCode, KeyEvent event) {
-        String data = String.format("%d KeyEvent UP: keyCode=%d (%s)\n",
-                event.getEventTime(), keyCode, KeyEvent.keyCodeToString(keyCode));
+        String data = String.format("%d KeyEvent UP: keyCode=%d (%s) meta=%d\n",
+                event.getEventTime(),
+                keyCode,
+                KeyEvent.keyCodeToString(keyCode),
+                event.getMetaState());
         logToFile(data);
+
+        // Let the system handle it normally too
         return super.onKeyUp(keyCode, event);
+    }
+
+    @Override  // a KeyEventListener
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        String data = String.format("%d Dispatch Key: action=%d keyCode=%d (%s) repeat=%d\n",
+                event.getEventTime(),
+                event.getAction(),
+                event.getKeyCode(),
+                KeyEvent.keyCodeToString(event.getKeyCode()),
+                event.getRepeatCount());
+        logToFile(data);
+
+        return super.dispatchKeyEvent(event);
     }
 
     @Override
