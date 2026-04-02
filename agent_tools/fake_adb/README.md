@@ -87,7 +87,7 @@ Edit `adb_wrapper_config.json`:
 adb shell -t -t getevent -lt | grep ABS_MT_POSITION
 ```
 The output will show the device path (e.g., `/dev/input/event4`).
-- The `global_event_interval_us` value may also be device-specific. Find it out by running `adb shell -t -t getevent -lt` on the host, then use your finger to swipe the screen, and check the output for the timestamps. 
+- The `global_event_interval_us` value may also be device-specific. Find it out by running `adb shell -t -t getevent -lt` on the host, then use your finger to swipe the screen, and check the output for the timestamps. Another method for double-checking: Running the sensor logger `MyMotionLogger` app with sensor logging disabled(see [README](../../data_collection/MyMotionLogger/README.md)), then run `adb shell input swipe 100 500 900 500` or use your finger to make a swipe on the blank zone in the sensor logger app, and check the sensorevent log for the timestamps of Motion Events. Note that in this log, you should ignore the "current timestamps" when action=2 because they are results of slower interpolation by the phone ui. 
 
 - The time taken for a non-humanized tap may also be device-specific. Find it out by tapping on the blank zone in the sensor logger app with `adb shell input tap 500 800` and checking the interval between the down event and up event in the sensor logger. Adjust the default 1000us in `do_tap()` if needed.
 

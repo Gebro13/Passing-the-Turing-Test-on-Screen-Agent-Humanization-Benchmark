@@ -43,6 +43,11 @@ adb shell rm /sdcard/Android/data/com.example.motionlogger/Files/motion_log.txt 
 adb shell am start -S com.example.motionlogger/.MainActivity # launch the app
 ```
 
+If you want to exclude sensorevent logging, change the 2nd line to:
+```bash
+adb shell am start -S --ez no_sensors true com.example.motionlogger/.MainActivity
+```
+
 In order to stop recording: 
 ```bash
 adb shell am force-stop com.example.motionlogger

@@ -67,7 +67,17 @@ public class MainActivity extends Activity implements SensorEventListener {
             }
         });
 
+        boolean noSensors = getIntent().getBooleanExtra("no_sensors", false);
+
         sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
+
+        if (!noSensors) {
+            // print the bool value
+            // logToFile(String.format("%d no_sensors=%b\n", SystemClock.elapsedRealtimeNanos(), noSensors));
+            // print the !bool value
+            // logToFile(String.format("%d yes_sensors=%b\n", SystemClock.elapsedRealtimeNanos(), !noSensors));
+            // logToFile(String.format("%d Sensor logging started\n", SystemClock.elapsedRealtimeNanos()));
+
         accelerometer = sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
         gyroscope = sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE);
         magneticField = sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD);
@@ -117,6 +127,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         if (stepDetector != null) {
             sensorManager.registerListener(this, stepDetector, SensorManager.SENSOR_DELAY_FASTEST);
         }
+        }
 
 
         long resulting_offset = sampleBootOffsetNs(10);
@@ -149,15 +160,76 @@ public class MainActivity extends Activity implements SensorEventListener {
         int pointerCount = event.getPointerCount();
         int actionMasked = event.getActionMasked();
         int actionIndex = event.getActionIndex();
+        int historySize = event.getHistorySize();
+        // getRawX()/getRawY() (no-arg, pointer 0) available since API 1.
+        // The raw-to-view offset is a constant translation across all pointers/history.
+        float rawOffsetX = event.getRawX() - event.getX();
+        float rawOffsetY = event.getRawY() - event.getY();
         sb.append(event.getEventTime()).append(" MotionEvent: action=").append(actionMasked)
                 .append(" actionIndex=").append(actionIndex)
-                .append(" pointerCount=").append(pointerCount).append("\n");
+                .append(" pointerCount=").append(pointerCount)
+                .append(" historySize=").append(historySize)
+                .append(" downTime=").append(event.getDownTime())
+                .append(" rawAction=").append(event.getAction())
+                .append(" source=").append(event.getSource())
+                .append(" deviceId=").append(event.getDeviceId())
+                .append(" flags=").append(event.getFlags())
+                .append(" edgeFlags=").append(event.getEdgeFlags())
+                .append(" metaState=").append(event.getMetaState())
+                .append(" buttonState=").append(event.getButtonState())
+                // .append(" classification=").append(event.getClassification()) # not available in api 25
+                .append(" xPrecision=").append(event.getXPrecision())
+                .append(" yPrecision=").append(event.getYPrecision())
+                .append(" rawX=").append(event.getRawX())
+                .append(" rawY=").append(event.getRawY())
+                .append(" x=").append(event.getX())
+                .append(" y=").append(event.getY())
+                .append("\n");
+        for (int h = 0; h < historySize; h++) {
+            sb.append("  historical[").append(h).append("] time=").append(event.getHistoricalEventTime(h)).append("\n");
+            for (int i = 0; i < pointerCount; i++) {
+                float hx = event.getHistoricalX(i, h);
+                float hy = event.getHistoricalY(i, h);
+                sb.append("    pointer[").append(i).append("] id=").append(event.getPointerId(i))
+                        .append(" x=").append(hx)
+                        .append(" y=").append(hy)
+                        .append(" deductedRawX=").append(hx + rawOffsetX)
+                        .append(" deductedRawY=").append(hy + rawOffsetY)
+                        .append(" axisvalueX=").append(event.getHistoricalAxisValue(MotionEvent.AXIS_X, i, h))
+                        .append(" axisvalueY=").append(event.getHistoricalAxisValue(MotionEvent.AXIS_Y, i, h))
+                        .append(" pressure=").append(event.getHistoricalPressure(i, h))
+                        .append(" orientation=").append(event.getHistoricalOrientation(i, h))
+                        .append(" size=").append(event.getHistoricalSize(i, h))
+                        .append(" touchMajor=").append(event.getHistoricalTouchMajor(i, h))
+                        .append(" touchMinor=").append(event.getHistoricalTouchMinor(i, h))
+                        .append(" toolMajor=").append(event.getHistoricalToolMajor(i, h))
+                        .append(" toolMinor=").append(event.getHistoricalToolMinor(i, h))
+                        .append(" tilt=").append(event.getHistoricalAxisValue(MotionEvent.AXIS_TILT, i, h))
+                        .append(" distance=").append(event.getHistoricalAxisValue(MotionEvent.AXIS_DISTANCE, i, h))
+                        .append(" toolType=").append(event.getToolType(i))
+                        .append("\n");
+            }
+        }
+        sb.append("  current: time=").append(event.getEventTime()).append("\n");
         for (int i = 0; i < pointerCount; i++) {
-            sb.append("  pointer[").append(i).append("] id=").append(event.getPointerId(i))
-                    .append(" x=").append(event.getX(i))
-                    .append(" y=").append(event.getY(i))
+            float cx = event.getX(i);
+            float cy = event.getY(i);
+            sb.append("    pointer[").append(i).append("] id=").append(event.getPointerId(i))
+                    .append(" x=").append(cx)
+                    .append(" y=").append(cy)
+                    .append(" deductedRawX=").append(cx + rawOffsetX)
+                    .append(" deductedRawY=").append(cy + rawOffsetY)
+                    .append(" axisvalueX=").append(event.getAxisValue(MotionEvent.AXIS_X, i))
+                    .append(" axisvalueY=").append(event.getAxisValue(MotionEvent.AXIS_Y, i))
                     .append(" pressure=").append(event.getPressure(i))
+                    .append(" orientation=").append(event.getOrientation(i))
                     .append(" size=").append(event.getSize(i))
+                    .append(" touchMajor=").append(event.getTouchMajor(i))
+                    .append(" touchMinor=").append(event.getTouchMinor(i))
+                    .append(" toolMajor=").append(event.getToolMajor(i))
+                    .append(" toolMinor=").append(event.getToolMinor(i))
+                    .append(" tilt=").append(event.getAxisValue(MotionEvent.AXIS_TILT, i))
+                    .append(" distance=").append(event.getAxisValue(MotionEvent.AXIS_DISTANCE, i))
                     .append(" toolType=").append(event.getToolType(i))
                     .append("\n");
         }
