@@ -84,6 +84,10 @@ def drag_and_fit(x1: int, y1: int, x2: int, y2: int, original_swipe: SingularAct
         new_y = y1 + transformed_offset.imag
         transformed_swipe.append(FingerEvent(timestamp_us=event.timestamp_us, x=int(new_x), y=int(new_y)))
 
+    end_upfinger_time_us = 50000 # legacy time; shouldn't matter under the current handling
+    last_time_us = transformed_swipe[-1].timestamp_us
+    transformed_swipe.append(FingerEvent(timestamp_us=last_time_us + end_upfinger_time_us, x=x2, y=y2))
+
     return transformed_swipe
 
 class FitEffortProvider:
@@ -103,8 +107,8 @@ class FitEffortProvider:
 
     def humanity_disturbance(self, original_swipe: SingularActionType) -> SingularActionType:
         """add some humanity disturbance to the original swipe(having no endpoints), which only takes into account its starting (x, y) and ending (x, y)"""
-        x1, y1 = original_swipe[0].x, original_swipe[0].y
-        x2, y2 = original_swipe[-1].x, original_swipe[-1].y
+        x1, y1 = startX(original_swipe), startY(original_swipe)
+        x2, y2 = endX(original_swipe), endY(original_swipe)
         return self.fit(x1, y1, x2, y2)
 
 

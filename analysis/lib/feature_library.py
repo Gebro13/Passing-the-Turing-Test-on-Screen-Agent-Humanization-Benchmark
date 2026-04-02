@@ -581,6 +581,106 @@ def f29_median_initial_acc_first5pnt(swipe: PhysicallyCorrectSingleSwipeType) ->
 
 
 
+def is_tap(gesture: SingularActionType, tap_len_max: int = 5) -> bool:
+    """Check if a gesture is a tap, defined as length <= tap_len_max."""
+    return pixel_length(gesture) <= tap_len_max
+
+def swipe_judger(single_finger_trace: SingularActionType) -> bool:
+    """
+    Judge whether the trace is a swipe.   
+    :return: True if it's a swipe, False if it's a tap. This is a very naive judger that only looks at the displacement between the start and end points. It can be easily tricked by an agent that simulates a tap with a very short swipe, but it serves as a simple baseline.
+    """
+    TAP_THRESHOLD = 30.0     # pixels
+
+    # if there is almost no movement, it's a tap
+    if directionless_displacement(single_finger_trace) < TAP_THRESHOLD:
+        return False
+    return True
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

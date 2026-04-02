@@ -9,9 +9,8 @@ from typing import List, Dict, Optional, Tuple
 import pandas as pd
 
 from analysis.lib.motionevent_classes import FingerEvent, SingularActionType, is_integral
-from analysis.lib.feature_library import extract_features, PhysicallyCorrectSingleSwipeType, transform_to_physically_correct_single_swipe_type
+from analysis.lib.feature_library import extract_features, PhysicallyCorrectSingleSwipeType, transform_to_physically_correct_single_swipe_type, is_tap
 from analysis.lib.gesture_log_reader_utils import filtered_gesture_generator_from_files_no_timestamp
-from analysis.processing.judge_library import is_tap
 
 
 def deprecated_cleanse_into_swipe(swipe: SingularActionType) -> Optional[PhysicallyCorrectSingleSwipeType]:

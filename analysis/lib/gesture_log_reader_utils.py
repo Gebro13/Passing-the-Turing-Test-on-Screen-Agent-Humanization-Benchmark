@@ -81,28 +81,56 @@ def single_trace_generator(adb_getevent_generator: List[str]) -> List[SingularAc
     TERMINATION_ID: Final[str] = 'ffffffff' # the id indicating the finger is lifted, which is inherited by the next trace if not replaced by a new id.
     inherited_id: str = TERMINATION_ID # the id inherited from the previous trace, which is TERMINATION_ID if no previous trace or the previous trace has been terminated. This is used to determine whether a new trace starts or the current trace ends when we encounter a SYN_REPORT line.
     last_is_syn_report: bool = True # only used to examine timestamp discrepancies.
-    
-    id_pattern = re.compile(r'ABS_MT_TRACKING_ID\s+([0-9a-f]+)')
-    x_pattern = re.compile(r'ABS_MT_POSITION_X\s+([0-9a-f]+)')
-    y_pattern = re.compile(r'ABS_MT_POSITION_Y\s+([0-9a-f]+)')
-    time_pattern = re.compile(r'^\[ {0,8}([0-9]+)\.([0-9]+)\]')
-    
+    last_is_key_event: bool = False # only used to detect unexpected key events in the log, which are not disruptive but may indicate some unexpected log format.
+    fleeting_id: str = "" # the id in the current syn_report block
+
+    exist_incomplete_sample: bool = False
+
+    id_pattern = re.compile(r'EV_ABS       ABS_MT_TRACKING_ID   ([0-9a-f]{8,8})')
+    x_pattern  = re.compile(r'EV_ABS       ABS_MT_POSITION_X    ([0-9a-f]{8,8})')
+    y_pattern  = re.compile(r'EV_ABS       ABS_MT_POSITION_Y    ([0-9a-f]{8,8})')
+    time_pattern = re.compile(r'^\[ {0,8}([0-9]{0,8})\.([0-9]{6,6})\]')
+
+    # currently useless pattern
+    button_pattern = re.compile(r'EV_KEY       BTN_TOUCH            (DOWN|UP)') 
+
+    # strange patterns that we should discard
+    key_pattern = re.compile(r'EV_KEY       KEY_([0-9A-Z]+)') # we only care about ABS_MT events, so lines with KEY_ are unexpected and should be discarded.
+    multitouch_pattern = re.compile(r'ABS_MT_SLOT\s+([0-9]+)') # we only support single-finger traces, so lines with ABS_MT_SLOT are unexpected and should be discarded.
+
     result: List[SingularActionType] = []
 
     for line in adb_getevent_generator:
-        
+
         time_match: Optional[Match[str]] = time_pattern.search(line)
         if time_match is None:
-            raise ValueError(f"Unexpected log format: timestamp not found in line: {line}")
+            continue # not a valid line, which is actually rather common at the geginning of a log.
 
         id_match = id_pattern.search(line)
         x_match = x_pattern.search(line)
         y_match = y_pattern.search(line)
         syn_report_in_line = "SYN_REPORT" in line
 
-        # assert exactly one of id_match, x_match, y_match, SYN_REPORT is not None in each line, otherwise the log format is unexpected and we raise an error.
-        if (sum(match is not None for match in [id_match, x_match, y_match]) + int(syn_report_in_line)) > 1:
-            raise ValueError(f"Unexpected log format: multiple matches in line: {line}")
+        button_match = button_pattern.search(line)
+
+        key_match = key_pattern.search(line)
+        syn_config_in_line = "SYN_CONFIG" in line # SYN_CONFIG lines are unexpected in our logs and may indicate some unexpected log format, but we don't raise an error for them because they don't disrupt the trace generation.
+        multitouch_match = multitouch_pattern.search(line)
+
+
+        if key_match is not None:
+            # print(f"Warning: EV_KEY event found in line, which is unexpected but not disruptive: {line}")
+            pass
+        if syn_config_in_line:
+            print(f"Warning: SYN_CONFIG found in line, which is unexpected but not disruptive: {line}")
+        if multitouch_match is not None:
+            raise NotImplementedError(f"Multitouch event found in line, which is unexpected and currently not supported: {line}")
+
+
+        # assert exactly one matches in each line, otherwise the log format is unexpected and we raise an error.
+        total_legal_matches = sum(match is not None for match in [id_match, x_match, y_match, button_match, key_match]) + sum(exist is True for exist in [syn_report_in_line, syn_config_in_line])
+        if total_legal_matches != 1:
+            raise ValueError(f"Unexpected log format: {total_legal_matches} matches in line: {line}")
 
         if time_match is not None:
             t_us_tmp = int(time_match.group(1)) * int(1e6) + int(time_match.group(2))
@@ -130,13 +158,48 @@ def single_trace_generator(adb_getevent_generator: List[str]) -> List[SingularAc
             y = hex_to_dec(y_match.group(1))
             
             last_is_syn_report = False
+
+        elif button_match is not None:
+
+            # only some error checking
+            button_stat = button_match.group(1)
+            if button_stat == "DOWN":
+                if (inherited_id == fleeting_id) and (inherited_id != TERMINATION_ID):
+                    pass
+                else:
+                    raise ValueError(f"Unexpected log format: button DOWN event without proper id inheritance. inherited_id: {inherited_id}, fleeting_id: {fleeting_id}, line: {line}")
+            elif button_stat == "UP":
+                if (inherited_id == fleeting_id) and (inherited_id == TERMINATION_ID):
+                    pass
+                else:
+                    raise ValueError(f"Unexpected log format: button UP event without proper id inheritance. inherited_id: {inherited_id}, fleeting_id: {fleeting_id}, line: {line}")
+            else:
+                raise ValueError(f"Unexpected log format: button event with unknown status: {button_stat}, line: {line}")
+
+            last_is_syn_report = False
         
+        elif key_match is not None:
+            last_is_key_event = True
+
+            last_is_syn_report = False
+
         elif syn_report_in_line:
             # SYN_REPORT indicates the current sample is completed
+            last_is_syn_report = True
+            fleeting_id = ""
+
+            if last_is_key_event:
+                last_is_key_event = False
+                continue # skip SYN_REPORT lines that come after key events, which are unexpected but not disruptive.
             
             # if any of t_us, x, y is None, it means the current sample is incomplete, which may be caused by unexpected log format or missing lines. We raise an error in this case.
-            if (t_us is None) or (x is None) or (y is None):
-                raise ValueError(f"Unexpected log format: incomplete sample before SYN_REPORT: {line}")
+            if (t_us is None):
+                raise ValueError(f"Unexpected log format: timestamp is missing for this SYN_REPORT block: {line}")
+            
+            if (x is None) or (y is None):
+                exist_incomplete_sample = True
+                # This means that the resulting trace may have none as result. 
+                # raise ValueError(f"Unexpected log format: incomplete sample before SYN_REPORT: {line}")
 
             current_gesture.append(FingerEvent(timestamp_us=t_us, x=x, y=y))
             # x, y = None, None shouldn't reset the saved values
@@ -150,10 +213,11 @@ def single_trace_generator(adb_getevent_generator: List[str]) -> List[SingularAc
                 result.append(current_gesture)
                 current_gesture = []    
             
-            last_is_syn_report = True
-
     if (not last_is_syn_report) or (not inherited_id == TERMINATION_ID) or (len(current_gesture) > 0):
-        raise ValueError(f"Unexpected log format: log ended without proper termination. last_is_syn_report: {last_is_syn_report}, inherited_id: {inherited_id}")
+        raise ValueError(f"Unexpected log format: log ended without proper termination. last_is_syn_report: {last_is_syn_report}, inherited_id: {inherited_id}, len(current_gesture): {len(current_gesture)}", result, current_gesture)
+
+    if exist_incomplete_sample:
+        raise ValueError(f"Unexpected log format: at least one incomplete sample detected. This may indicate missing lines or some other log format issue. Please check the logs for details. The generated trace may contain incomplete samples with None values.", result)
 
     return result
 
@@ -284,18 +348,64 @@ def ranged_batched_modified_generator_with_session_timestamp(
             #print(participant_name, index, timestamp)
             if (index_range is not None) and (index not in index_range):
                 continue
+            
+            if pd.isnull(timestamp):
+                # print(f"Warning: Null timestamp found for participant {participant_name} at index {index}. Skipping this entry.")
+                continue
+
             stripped_timestamp = str(timestamp).strip()
             if (stripped_timestamp == ""):
                 continue
             #print(stripped_timestamp)
             #continue
+
+            # assert that the timestamp follow the yyyymmdd_hhmmss format, otherwise the log format is unexpected and we raise an error.
+            if not re.match(r'^\d{8}_\d{6}$', stripped_timestamp):
+                print(f"Unexpected timestamp format for participant {participant_name} at index {index}: '{timestamp}'")
+                continue
+            
             try:
                 file_path = file_finder(Path("logs/"), "gesture_recording_" + stripped_timestamp + ".log")
             except FileNotFoundError as e:
-                print(e)
-                continue
+                print(participant_name, e)
+                raise e
             line_generator = file_reader_yield(str(file_path))
-            single_trace_generated = single_trace_generator(line_generator)
+
+            try:
+                single_trace_generated = single_trace_generator(line_generator)
+                
+            except ValueError as e:
+                if "incomplete sample" in e.args[0]:
+                    print(f"Warning: Incomplete sample detected in file {file_path}. This may indicate an unexpected log format or missing lines. Keeping the traces with complete properties.")
+                    thingy_to_filter = e.args[1]
+                    accumulator: List[SingularActionType] = []
+                    for item in reversed(thingy_to_filter):
+                        if not is_integral(item):
+                            break
+                        accumulator.append(item)
+                    single_trace_generated = list(reversed(accumulator))
+                    print(f"Kept {len(single_trace_generated)} complete samples from all {len(thingy_to_filter)} samples in the generated trace.")
+
+                elif "without proper termination" in e.args[0]:
+                    print(f"Warning: Error processing file {file_path}: {e.args[0]}. Discarding the last incomplete trace.")
+                    single_trace_generated = e.args[1] # compact stacked traces are contact.
+
+                elif "invalid id inheritance" in e.args[0]:
+                    print(f"Error processing file {file_path}: {e}. Skipping this file.")
+                    continue
+
+                else:
+                    print(f"Error processing file {file_path}: {e}")
+                    raise e
+
+            except NotImplementedError as e:
+                if "Multitouch event found in line" in e.args[0]:
+                    print(f"Warning: Multitouch event found in file {file_path}, which is unexpected and currently not supported. Skipping this file.")
+                    continue
+                else:
+                    print(f"Error processing file {file_path}: {e}")
+                    raise e
+
             if filtering_and_modification_function is not None:
                 swipe_generated = filtering_and_modification_function(single_trace_generated)
             else:

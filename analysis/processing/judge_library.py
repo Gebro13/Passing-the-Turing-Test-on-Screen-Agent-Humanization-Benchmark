@@ -7,7 +7,7 @@ from analysis.lib.motionevent_classes import SingularActionType
 from typing import Dict, Tuple, TypedDict, List
 
 from analysis.lib.gesture_log_reader_utils import FingerEvent, SessionType
-from analysis.lib.feature_library import directionless_displacement, startT_us, endT_us, pixel_length
+from analysis.lib.feature_library import directionless_displacement, startT_us, endT_us, pixel_length, is_tap, swipe_judger
 from analysis.processing.calculate_roc_auc_from_feature import get_numeric_feature_column_names, get_feature_columns, ThresholdPosterior
 import numpy as np
 from sklearn.pipeline import Pipeline
@@ -15,21 +15,6 @@ from xgboost import XGBClassifier
 from analysis.processing.extract_feature_of_swipes import build_features_dataframe
 
 
-def is_tap(gesture: SingularActionType, tap_len_max: int = 5) -> bool:
-    """Check if a gesture is a tap, defined as length <= tap_len_max."""
-    return pixel_length(gesture) <= tap_len_max
-
-def swipe_judger(single_finger_trace: SingularActionType) -> bool:
-    """
-    Judge whether the trace is a swipe.   
-    :return: True if it's a swipe, False if it's a tap. This is a very naive judger that only looks at the displacement between the start and end points. It can be easily tricked by an agent that simulates a tap with a very short swipe, but it serves as a simple baseline.
-    """
-    TAP_THRESHOLD = 30.0     # pixels
-
-    # if there is almost no movement, it's a tap
-    if directionless_displacement(single_finger_trace) < TAP_THRESHOLD:
-        return False
-    return True
 
 def naive_agent_judger(single_finger_trace: list[FingerEvent]) -> bool:
     """
