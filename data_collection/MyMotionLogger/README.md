@@ -48,6 +48,16 @@ If you want to exclude sensorevent logging, change the 2nd line to:
 adb shell am start -S --ez no_sensors true com.example.motionlogger/.MainActivity
 ```
 
+If you want to add beeping when recording, change the 2nd line to:
+```bash
+adb shell am start -S --ez beeping true com.example.motionlogger/.MainActivity
+```
+
+Combining the two options:
+```bash
+adb shell am start -S --ez no_sensors true --ez beeping true com.example.motionlogger/.MainActivity
+```
+
 In order to stop recording: 
 ```bash
 adb shell am force-stop com.example.motionlogger
