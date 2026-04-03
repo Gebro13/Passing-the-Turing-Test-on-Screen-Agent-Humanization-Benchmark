@@ -45,6 +45,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     private Sensor linearAcceleration;
     private Sensor stepCounter;
     private Sensor stepDetector;
+    private boolean beeping = false;
 
 
     public class LoggingEditText extends androidx.appcompat.widget.AppCompatEditText {
@@ -153,6 +154,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         });
 
         boolean noSensors = getIntent().getBooleanExtra("no_sensors", false);
+        beeping = getIntent().getBooleanExtra("beeping", false);
 
         sensorManager = (SensorManager) getSystemService(Context.SENSOR_SERVICE);
 
@@ -334,8 +336,28 @@ public class MainActivity extends Activity implements SensorEventListener {
         return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(new Date());
     }
 
+    private void debugBeep() {
+        try {
+            ToneGenerator toneGen = new ToneGenerator(AudioManager.STREAM_NOTIFICATION, 100);
+            toneGen.startTone(ToneGenerator.TONE_PROP_BEEP, 200);
+        } catch (Exception e) {
+            Log.e(TAG, "Beep failed", e);
+        }
+    }
+
+    private long lastBeepTime = 0;
+
     @Override
     public void onSensorChanged(SensorEvent event) {
+
+        if (beeping) {
+            long currentTime = SystemClock.elapsedRealtime();
+            if (currentTime - lastBeepTime > 10000) { // 10 seconds in milliseconds
+                lastBeepTime = currentTime;
+                debugBeep();
+            }
+        }
+
         String sensorType;
         switch (event.sensor.getType()) {
             case Sensor.TYPE_ACCELEROMETER:
