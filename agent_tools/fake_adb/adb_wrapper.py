@@ -39,6 +39,8 @@ try:
     from analysis.lib.motionevent_classes import GotEvent, FingerEvent, SingularActionType, is_integral
     from analysis.processing.fit_effort_provider import FitEffortProvider, bot_line_fit
     from analysis.processing.fit_effort_provider import tap as fit_effort_provider_tap
+    from analysis.lib.feature_library import PhysicallyCorrectSingleSwipeType
+
 except ImportError as e:
     print(f"Wrapper Error: Could not import dependencies: {e}", file=sys.stderr)
     sys.exit(1)
@@ -125,6 +127,32 @@ def log_base64_encoded_and_decoded_str(base64_str: str) -> None:
 def log_special_key(key_name: str) -> None:
     raw_log_str(f"{get_current_phone_timestamp()} <{key_name}>\n")
 
+
+def extend_PhysicallyCorrectSingleSwipeType_to_SingularActionType(swipe: PhysicallyCorrectSingleSwipeType) -> SingularActionType:
+    """
+        Warning: This function modifies the input swipe in place.
+    """
+    
+    end_upfinger_time_us = 50000 # legacy time; shouldn't matter under the current handling
+    last_time_us = swipe[-1].timestamp_us
+    last_x = swipe[-1].x
+    last_y = swipe[-1].y
+    swipe.append(FingerEvent(timestamp_us=last_time_us + end_upfinger_time_us, x=last_x, y=last_y))
+    return swipe
+
+def load_PhysicallyCorrectSingleSwipeType_pickle(pkl_path: Path) -> List[SingularActionType]:
+    with open(pkl_path, "rb") as f:
+        loaded_data: List[PhysicallyCorrectSingleSwipeType] = pickle.load(f)
+    
+    result: List[SingularActionType] = []
+
+    for swipe in loaded_data:
+        extended_swipe = extend_PhysicallyCorrectSingleSwipeType_to_SingularActionType(swipe)
+        result.append(extended_swipe)
+
+    return loaded_data
+
+
 class MotionGenerator:
     static_fit_effort_provider: Optional[FitEffortProvider] = None
 
@@ -133,9 +161,8 @@ class MotionGenerator:
         if MotionGenerator.static_fit_effort_provider is None:
             try:
                 pkl_path = PROJ_FOLDER / "analysis" / "processing" / "swipe_data.pkl"
-                with open(pkl_path, "rb") as f:
-                    pickled: List[SingularActionType] = pickle.load(f)
-                    MotionGenerator.static_fit_effort_provider = FitEffortProvider(pickled)
+                pickled = load_PhysicallyCorrectSingleSwipeType_pickle(pkl_path)
+                MotionGenerator.static_fit_effort_provider = FitEffortProvider(pickled)
             except FileNotFoundError as e:
                 print(f"Warning: Could not find swipe_data.pkl: {e}", file=sys.stderr)
 

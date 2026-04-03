@@ -84,10 +84,6 @@ def drag_and_fit(x1: int, y1: int, x2: int, y2: int, original_swipe: SingularAct
         new_y = y1 + transformed_offset.imag
         transformed_swipe.append(FingerEvent(timestamp_us=event.timestamp_us, x=int(new_x), y=int(new_y)))
 
-    end_upfinger_time_us = 50000 # legacy time; shouldn't matter under the current handling
-    last_time_us = transformed_swipe[-1].timestamp_us
-    transformed_swipe.append(FingerEvent(timestamp_us=last_time_us + end_upfinger_time_us, x=x2, y=y2))
-
     return transformed_swipe
 
 class FitEffortProvider:

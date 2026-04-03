@@ -8,7 +8,7 @@ import pandas as pd
 import sklearn.preprocessing
 from sklearn.manifold import TSNE
 import matplotlib.pyplot as plt
-from typing import Callable, List, Dict, Optional, Tuple, TypedDict, Union, Set
+from typing import Callable, List, Dict, Optional, Protocol, Tuple, TypedDict, Union, Set
 import numpy.typing as npt
 import argparse
 from analysis.lib.motionevent_classes import SingularActionType
@@ -712,7 +712,7 @@ def calculate_svm_and_xgboost(features_csv: pd.DataFrame, pos_label: str, neg_la
         svm_clf = make_pipeline(StandardScaler(), SVC(kernel="rbf", probability=True, random_state=42))
         svm_clf.fit(X_train, y_train)
         y_pred_svm = svm_clf.predict(X_test)
-        svm_acc: float = accuracy_score(y_test, y_pred_svm)
+        svm_acc: float = float(accuracy_score(y_test, y_pred_svm))
 
         # XGBoost
         xgb_clf = XGBClassifier(
@@ -728,7 +728,7 @@ def calculate_svm_and_xgboost(features_csv: pd.DataFrame, pos_label: str, neg_la
         )
         xgb_clf.fit(X_train, y_train)
         y_pred_xgb = xgb_clf.predict(X_test)
-        xgb_acc: float = accuracy_score(y_test, y_pred_xgb)
+        xgb_acc: float = float(accuracy_score(y_test, y_pred_xgb))
         
         result: SVMAndXGBoostResult = {"svm_accuracy": svm_acc, "xgb_accuracy": xgb_acc}
         return result, svm_clf, xgb_clf
@@ -759,10 +759,13 @@ def make_feature_and_learner_table(task_cluster_id: int, method_name: str,
     return result_csv
 
 
+class AccObtainFunction(Protocol):
+    def __call__(self, filtered_df: pd.DataFrame, pos_label: str, neg_label: str) -> Tuple[pd.DataFrame, Dict[str, ThresholdPosterior]]: ...
+
 def make_feature_and_learner_table_but_acc(task_cluster_id: int, method_name: str, 
                 pos_iterator: Tuple[str, List[SingularActionType]], 
                 neg_iterator: Tuple[str, List[SingularActionType]],
-                acc_obtain_function: Callable[[pd.DataFrame, str, str], Tuple[pd.DataFrame, Dict[str, ThresholdPosterior]]]
+                acc_obtain_function: AccObtainFunction
                 ) -> Tuple[pd.DataFrame, sklearn.pipeline.Pipeline, XGBClassifier]:
     result_csv = pd.DataFrame()
 
