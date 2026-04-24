@@ -4,11 +4,11 @@
 # from __future__ import annotations
 import argparse
 from pathlib import Path
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Sequence, Tuple, TypedDict
 
 import pandas as pd
 
-from analysis.lib.motionevent_classes import FingerEvent, SingularActionType, is_integral
+from analysis.lib.motionevent_classes import FingerEvent, SingularActionType, is_integral, SessionType, SwipeFeaturedSessionType
 from analysis.lib.feature_library import extract_features, PhysicallyCorrectSingleSwipeType, transform_to_physically_correct_single_swipe_type, is_tap
 from analysis.lib.gesture_log_reader_utils import filtered_gesture_generator_from_files_no_timestamp
 
@@ -39,7 +39,8 @@ def keep_swipe(gesture: SingularActionType) -> Optional[SingularActionType]:
 
 def build_features_dataframe(one_gesture_generator_for_each_file: List[Tuple[str, List[SingularActionType]]]) -> pd.DataFrame:
     """
-    iterate swipes, extract swipe features, and return a DataFrame.
+    iterate swipes, extract swipe features, and return a DataFrame.  
+    Ensure that the order of rows in the resulting DataFrame is the same as the order of swipes in the input generators. This is important for any time-series analysis that may be performed later, as well as for correctly associating labels with features if needed.
     
     :param one_gesture_generator_for_each_file: (label_to_insert_into_dataframe, swipe_iterator) for each file.
     :return: The resulting DataFrame has a 'type' column followed by feature columns.
@@ -61,6 +62,22 @@ def build_features_dataframe(one_gesture_generator_for_each_file: List[Tuple[str
     # Ensure 'type' is the first column
     cols = ["type"] + [c for c in df.columns if c != "type"]
     return df[cols]
+
+
+def build_features_dataframe_for_sessions(one_swipe_generator_for_each_file: SessionType) -> SwipeFeaturedSessionType:
+    """
+    iterate swipes, extract swipe features, and return a DataFrame.
+    
+    :param one_swipe_generator_for_each_file: (session_id, label_to_insert_into_dataframe, swipe_iterator) for each file.
+    :return: The resulting DataFrame component consist of swipe features vector for each row and strictly increase index as time progresses.
+    """
+    session_id, swipe_iterator = one_swipe_generator_for_each_file
+    features: List[Dict[str, float]] = [
+        extract_features(swipe) for swipe in swipe_iterator
+    ]
+    df_feat = pd.DataFrame(features) # a df for each file, containing all features but no label
+    return SwipeFeaturedSessionType(session_id=session_id, features=df_feat) #.to_dict(orient="list"))
+
 
 
 def main() -> None:

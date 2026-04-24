@@ -1,5 +1,6 @@
 # from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 import sys
 import re
@@ -11,7 +12,10 @@ import matplotlib.pyplot as plt
 from typing import Callable, List, Dict, Optional, Protocol, Tuple, TypedDict, Union, Set
 import numpy.typing as npt
 import argparse
-from analysis.lib.motionevent_classes import SingularActionType
+
+import torch
+import tqdm
+from analysis.lib.motionevent_classes import SingularActionType, SessionType, SwipeFeaturedSessionType
 from analysis.processing.extract_feature_of_swipes import build_features_dataframe
 from sklearn.feature_selection import mutual_info_classif
 
@@ -97,19 +101,85 @@ def compute_auc_per_feature(filtered_df: pd.DataFrame, pos_label: str, neg_label
     return res
 
 
+@dataclass
+class BinaryClassificationMetrics:
+    TP: int
+    FP: int
+    TN: int
+    FN: int
 
-class ThresholdPosterior(TypedDict):
-    """
-    Docstring for ThresholdPosterior
+    def accuracy(self) -> float:
+        total = self.TP + self.FP + self.TN + self.FN
+        if total == 0:
+            raise ValueError("Total number of samples is zero in BinaryClassificationMetrics.")
+        return (self.TP + self.TN) / total
+    
+    def precision(self) -> float:
+        denom = self.TP + self.FP
+        if denom == 0:
+            raise ValueError("Precision is undefined when TP + FP is zero.")
+        return self.TP / denom
+    
+    def recall_or_TPR(self) -> float:
+        denom = self.TP + self.FN
+        if denom == 0:
+            raise ValueError("Recall is undefined when TP + FN is zero.")
+        return self.TP / denom
+        
+    def FPR(self) -> float:
+        denom = self.FP + self.TN
+        if denom == 0:
+            raise ValueError("FPR is undefined when FP + TN is zero.")
+        return self.FP / denom
 
-    :param threshold: Description
-    :param lesser_than_threshold_agent_log_odds: log(P(less than threshold | agent) / P(less than threshold | human))
-    :param greater_than_threshold_agent_log_odds: log(P(greater than threshold | agent) / P(greater than threshold | human))
+    def flexible_tpr(self) -> float:
+        hard_tpr = self.recall_or_TPR()
+        if (hard_tpr < 0.5):
+            return 1 - hard_tpr
+        else:
+            return hard_tpr
+        
+    def flexible_fpr(self) -> float:
+        hard_fpr = self.FPR()
+        if (self.recall_or_TPR() < 0.5):
+            return 1 - hard_fpr
+        else:
+            return hard_fpr
+
+    # now add a simple summary for print(), print all metrics in several good tables.
+    def summary(self) -> str:
+        acc = self.accuracy()
+        prec = self.precision()
+        rec = self.recall_or_TPR()
+        fpr = self.FPR()
+        return (f"Accuracy: {acc:.4f}\n"
+                f"Precision: {prec:.4f}\n"
+                f"Recall/TPR: {rec:.4f}\n"
+                f"FPR: {fpr:.4f}\n")
+
+
+@dataclass
+class ThresholdPosterior:
     """
+    Dataclass representing posterior probabilities for a binary classification threshold.
+
+    :param metrics: Binary classification metrics (TP, FP, TN, FN)
+    :param threshold: The threshold value used for classification
+    :ivar lesser_than_threshold_agent_log_odds: log(P(less than threshold | agent) / P(less than threshold | human))
+    :ivar greater_than_threshold_agent_log_odds: log(P(greater than threshold | agent) / P(greater than threshold | human))
+    """
+    metrics: BinaryClassificationMetrics
     threshold: float
     lesser_than_threshold_agent_log_odds: float
     greater_than_threshold_agent_log_odds: float
 
+    def __init__(self, metrics: BinaryClassificationMetrics, threshold: float):
+        self.metrics = metrics
+        self.threshold = threshold
+        tpr = self.metrics.recall_or_TPR()
+        fpr = self.metrics.FPR()
+        self.lesser_than_threshold_agent_log_odds = float(np.log(tpr) - np.log(fpr))
+        self.greater_than_threshold_agent_log_odds = float(np.log((1 - tpr) ) - np.log(1 - fpr))
 
 
 def compute_acc_per_feature_using_max_precision(filtered_df: pd.DataFrame, pos_label: str, neg_label: str) -> Tuple[pd.DataFrame, Dict[str, ThresholdPosterior]]:
@@ -176,14 +246,16 @@ def compute_acc_per_feature_using_max_precision(filtered_df: pd.DataFrame, pos_l
 
         max_acc = (max_acc / n_pos) / (max_acc / n_pos +  (1 - max_acc) / n_neg)
 
-        # note that the positive may be irrelevant to agent being 1 or 0; we just care about threshold_posterior which nihilates the discrepancy
-        true_positive_rate = np.sum((raw_scores >= thresh) & (y == 1)) / np.sum(y == 1)
-        false_positive_rate = np.sum((raw_scores >= thresh) & (y == 0)) / np.sum(y == 0)
-        threshold_posterior: ThresholdPosterior = {
-            "threshold": float(thresh),
-            "greater_than_threshold_agent_log_odds": float(np.log(true_positive_rate) - np.log(false_positive_rate)), # np.log(0.0) is -inf, and throw RuntimeWarning: divide by zero encountered in log
-            "lesser_than_threshold_agent_log_odds": float(np.log((1 - true_positive_rate) ) - np.log(1 - false_positive_rate)),
-        }
+        # note that the positive may be irrelevant to agent being 1 or 0; we just care about threshold_posterior which nihilates the discrepancy.
+        # we assume that agent values are more likely to be above the threshold.
+        metrics = BinaryClassificationMetrics(
+            TP=np.sum((raw_scores >= thresh) & (y == 1)),
+            FP=np.sum((raw_scores >= thresh) & (y == 0)),
+            TN=np.sum((raw_scores < thresh) & (y == 0)),
+            FN=np.sum((raw_scores < thresh) & (y == 1)),
+        )
+
+        threshold_posterior = ThresholdPosterior(metrics=metrics, threshold=float(thresh))
         threshold_posteriors[feat] = threshold_posterior
 
         results.append({
@@ -233,17 +305,18 @@ def compute_acc_per_feature_using_thresholding(filtered_df: pd.DataFrame, pos_la
 
         
         # note that the positive may be irrelevant to agent being 1 or 0; we just care about threshold_posterior which nihilates the discrepancy
-        y_pred = (raw_scores <= threshold).astype(int)
+        y_pred = (raw_scores >= threshold).astype(int)
         acc = accuracy_score(y, y_pred)
 
-        true_positive_rate = np.sum((y_pred == 1) & (y == 1)) / np.sum(y == 1)
-        false_positive_rate = np.sum((y_pred == 1) & (y == 0)) / np.sum(y == 0)
-
-        threshold_posterior: ThresholdPosterior = {
-            "threshold": float(threshold),
-            "lesser_than_threshold_agent_log_odds": float(np.log(true_positive_rate) - np.log(false_positive_rate)), # np.log(0.0) is -inf, and throw RuntimeWarning: divide by zero encountered in log
-            "greater_than_threshold_agent_log_odds": float(np.log((1 - true_positive_rate) ) - np.log(1 - false_positive_rate)),
-        }
+        # Create BinaryClassificationMetrics object
+        metrics = BinaryClassificationMetrics(
+            TP=np.sum((y_pred == 1) & (y == 1)),
+            FP=np.sum((y_pred == 1) & (y == 0)),
+            TN=np.sum((y_pred == 0) & (y == 0)),
+            FN=np.sum((y_pred == 0) & (y == 1)),
+        )
+        
+        threshold_posterior = ThresholdPosterior(metrics=metrics, threshold=float(threshold))
         threshold_posteriors[feat] = threshold_posterior   
 
         results.append({
@@ -359,13 +432,14 @@ def compute_acc_per_feature_using_break_even_point(filtered_df: pd.DataFrame, po
                 if acc > best_acc:
                     best_acc = acc
 
-                    true_positive_rate = np.sum((y_pred == 1) & (y == 1)) / np.sum(y == 1)
-                    false_positive_rate = np.sum((y_pred == 1) & (y == 0)) / np.sum(y == 0)
-                    threshold_posterior: ThresholdPosterior = {
-                        "threshold": float(thresh),
-                        "greater_than_threshold_agent_log_odds": float(np.log(true_positive_rate) - np.log(false_positive_rate)), # np.log(0.0) is -inf, and throw RuntimeWarning: divide by zero encountered in log
-                        "lesser_than_threshold_agent_log_odds": float(np.log((1 - true_positive_rate) ) - np.log(1 - false_positive_rate)),
-                    }
+                    # Create BinaryClassificationMetrics object
+                    metrics = BinaryClassificationMetrics(
+                        TP=np.sum((y_pred == 1) & (y == 1)),
+                        FP=np.sum((y_pred == 1) & (y == 0)),
+                        TN=np.sum((y_pred == 0) & (y == 0)),
+                        FN=np.sum((y_pred == 0) & (y == 1)),
+                    )
+                    threshold_posterior = ThresholdPosterior(metrics=metrics, threshold=float(thresh))
                     threshold_posteriors[feat] = threshold_posterior
             except Exception:
                 continue
@@ -449,11 +523,14 @@ def compute_acc_per_feature_using_x_1_x_point_on_roc_auc(filtered_df: pd.DataFra
         acc = (acc / n_pos) / (acc / n_pos +  (1 - acc) / n_neg) # force an equal number of pos and neg
         acc = max(acc, 1 - acc)  # orientation invariant
 
-        threshold_posterior: ThresholdPosterior = {
-            "threshold": float(thresh),
-            "greater_than_threshold_agent_log_odds": float(np.log(tpr[idx]) - np.log(fpr[idx])),
-            "lesser_than_threshold_agent_log_odds": float(np.log((1 - tpr[idx]) ) - np.log(1 - fpr[idx])),
-        }
+        # Create BinaryClassificationMetrics object
+        metrics = BinaryClassificationMetrics(
+            TP=np.sum((y_pred == 1) & (y == 1)),
+            FP=np.sum((y_pred == 1) & (y == 0)),
+            TN=np.sum((y_pred == 0) & (y == 0)),
+            FN=np.sum((y_pred == 0) & (y == 1)),
+        )
+        threshold_posterior = ThresholdPosterior(metrics=metrics, threshold=float(thresh))
         threshold_posteriors[feat] = threshold_posterior   
 
         results.append({
@@ -578,6 +655,8 @@ def _sanitize_filename(name: str) -> str:
 class SVMAndXGBoostResult(TypedDict):
     svm_accuracy: Optional[float]
     xgb_accuracy: Optional[float]
+    svm_test_metrics: BinaryClassificationMetrics
+    xgb_test_metrics: BinaryClassificationMetrics
 
 def get_feature_columns(filtered: pd.DataFrame, feature_cols: List[str]) -> pd.DataFrame:
     """
@@ -673,6 +752,8 @@ def calculate_mutual_information_multiclass(features_csv: pd.DataFrame, classses
         res = res.sort_values("mutual_information", ascending=False).reset_index(drop=True)
     return res
 
+COMPLICATED_MODEL_TEST_SET_SIZE = 0.3
+
 def calculate_svm_and_xgboost(features_csv: pd.DataFrame, pos_label: str, neg_label: str) -> Tuple[SVMAndXGBoostResult, Optional[sklearn.pipeline.Pipeline], Optional[XGBClassifier]]:
     """
     This function computes SVM and XGBoost classification accuracies on the provided features dataframe for the given positive and negative labels, excluding unmentioned labels.
@@ -703,7 +784,7 @@ def calculate_svm_and_xgboost(features_csv: pd.DataFrame, pos_label: str, neg_la
         if (y.value_counts().min() < 2):
             return {"svm_accuracy": None, "xgb_accuracy": None}, None, None
         X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.3, random_state=42, stratify=y
+            X, y, test_size=COMPLICATED_MODEL_TEST_SET_SIZE, random_state=42, stratify=y
         )
         # ValueError: The least populated class in y has only 1 member, which is too few. The minimum number of groups for any class cannot be less than 2.
         
@@ -713,6 +794,12 @@ def calculate_svm_and_xgboost(features_csv: pd.DataFrame, pos_label: str, neg_la
         svm_clf.fit(X_train, y_train)
         y_pred_svm = svm_clf.predict(X_test)
         svm_acc: float = float(accuracy_score(y_test, y_pred_svm))
+        svm_test_metrics = BinaryClassificationMetrics(
+            TP=np.sum((y_pred_svm == 1) & (y_test == 1)),
+            FP=np.sum((y_pred_svm == 1) & (y_test == 0)),
+            TN=np.sum((y_pred_svm == 0) & (y_test == 0)),
+            FN=np.sum((y_pred_svm == 0) & (y_test == 1)),
+        )
 
         # XGBoost
         xgb_clf = XGBClassifier(
@@ -729,11 +816,256 @@ def calculate_svm_and_xgboost(features_csv: pd.DataFrame, pos_label: str, neg_la
         xgb_clf.fit(X_train, y_train)
         y_pred_xgb = xgb_clf.predict(X_test)
         xgb_acc: float = float(accuracy_score(y_test, y_pred_xgb))
+        xgb_test_metrics = BinaryClassificationMetrics(
+            TP=np.sum((y_pred_xgb == 1) & (y_test == 1)),
+            FP=np.sum((y_pred_xgb == 1) & (y_test == 0)),
+            TN=np.sum((y_pred_xgb == 0) & (y_test == 0)),
+            FN=np.sum((y_pred_xgb == 0) & (y_test == 1)),
+        )
         
-        result: SVMAndXGBoostResult = {"svm_accuracy": svm_acc, "xgb_accuracy": xgb_acc}
+        result: SVMAndXGBoostResult = {"svm_accuracy": svm_acc, "xgb_accuracy": xgb_acc, "svm_test_metrics": svm_test_metrics, "xgb_test_metrics": xgb_test_metrics}
         return result, svm_clf, xgb_clf
     else:
-        return {"svm_accuracy": None, "xgb_accuracy": None}, None, None
+        return {"svm_accuracy": None, "xgb_accuracy": None, "svm_test_metrics": None, "xgb_test_metrics": None}, None, None
+
+
+class LSTMClassifier(torch.nn.Module):
+    def __init__(self, input_size: int, hidden_size: int = 10, num_layers: int = 2, dropout: float = 0.3):
+        super().__init__()
+        self.lstm = torch.nn.LSTM(
+            input_size=input_size,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            batch_first=True,
+            dropout=dropout if num_layers > 1 else 0.0,
+        )
+        self.fc = torch.nn.Linear(hidden_size, 1)
+
+    def forward(self, x: torch.Tensor, lengths: torch.Tensor) -> torch.Tensor:
+        """
+        :param x: (batch, max_seq_len, input_size)
+        :param lengths: (batch,) actual sequence lengths
+        :return: (batch,) logits
+        """
+        packed: torch.nn.utils.rnn.PackedSequence = torch.nn.utils.rnn.pack_padded_sequence(x, lengths.cpu(), batch_first=True, enforce_sorted=False)
+        _, (h_n, _) = self.lstm(packed)
+        # h_n: (num_layers, batch, hidden_size) → use last layer
+        out = self.fc(h_n[-1])  # (batch, 1)
+        return out.squeeze(-1)
+
+@dataclass
+class LSTMClassificationResult:
+    metrics: BinaryClassificationMetrics
+    # use pytorch model
+    model: Optional[torch.nn.Module]
+
+def classify_using_lstm(
+    input_vec_len: int,
+    predictors: List[SwipeFeaturedSessionType],
+    positive_labeled: List[bool]
+) -> LSTMClassificationResult:
+    """
+    This function trains an LSTM-based binary classifier on the provided swipe session data and returns the classification metrics and the trained model.
+    
+    :param predictors: A list of swipe session data, where each session is represented as a sequence of feature vectors (SwipeFeaturedSessionType).
+    :param positive_labeled: A list of boolean labels corresponding to each session, where True indicates a positive label and False indicates a negative label.
+    :return: An LSTMClassificationResult containing the binary classification metrics and the trained LSTM model.
+    """
+    assert len(predictors) == len(positive_labeled), "Predictors and labels must have the same length."
+    for session in predictors:
+        assert session.features.shape[1] == input_vec_len, f"Each feature vector must have length {input_vec_len} instead of {session.features.shape[1]}."
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    # Convert each session's DataFrame to numpy
+    sequences = [session.features.to_numpy(dtype=np.float64) for session in predictors]
+    labels = np.array(positive_labeled, dtype=np.float32)
+    lengths = np.array([seq.shape[0] for seq in sequences], dtype=np.int64)
+
+    # Global normalization across all timesteps
+    all_features = np.concatenate(sequences, axis=0)  # (total_timesteps, input_vec_len)
+    mean = all_features.mean(axis=0)
+    std = all_features.std(axis=0)
+    std[std == 0] = 1.0 # warning: if a feature has zero variance, we set std to 1 to avoid division by zero. This effectively leaves that feature unchanged after normalization.
+    sequences = [(seq - mean) / std for seq in sequences]
+
+    # Pad to max length
+    max_len = max(seq.shape[0] for seq in sequences)
+    padded = np.zeros((len(sequences), max_len, input_vec_len), dtype=np.float32)
+    for i, seq in enumerate(sequences):
+        padded[i, :seq.shape[0], :] = seq
+
+    # Train/test split
+    indices = np.arange(len(predictors))
+    train_idx, test_idx = train_test_split(
+        indices, test_size=COMPLICATED_MODEL_TEST_SET_SIZE, random_state=42, stratify=labels
+    )
+
+    X_train = torch.tensor(padded[train_idx], dtype=torch.float32, device=device)
+    X_test = torch.tensor(padded[test_idx], dtype=torch.float32, device=device)
+    y_train = torch.tensor(labels[train_idx], dtype=torch.float32, device=device)
+    y_test = torch.tensor(labels[test_idx], dtype=torch.float32, device=device)
+    # raise an error if y_test is all 0 or all 1, as that would make accuracy meaningless
+    if y_test.sum() == 0 or y_test.sum() == len(y_test):
+        raise ValueError("Test set has only one class present, cannot evaluate accuracy.")
+    else:
+        print(f"Test set has {y_test.sum().item()} positive samples and {len(y_test) - y_test.sum().item()} negative samples.")
+
+    len_train = torch.tensor(lengths[train_idx], dtype=torch.long)
+    len_test = torch.tensor(lengths[test_idx], dtype=torch.long)
+
+    # Model, optimizer, loss
+    model = LSTMClassifier(input_size=input_vec_len).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, weight_decay=1e-4)
+    criterion = torch.nn.BCEWithLogitsLoss()
+
+    # Training
+    n_epochs = 100
+    batch_size = 32
+    n_train = len(train_idx)
+    model.train()
+    for epoch in tqdm.trange(n_epochs):
+        perm = torch.randperm(n_train)
+        for start in range(0, n_train, batch_size):
+            batch_idx = perm[start:start + batch_size]
+            logits = model(X_train[batch_idx], len_train[batch_idx])
+            loss = criterion(logits, y_train[batch_idx])
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+    # Evaluate the lstm
+    model.eval()
+    with torch.no_grad():
+        logits = model(X_test, len_test)
+        preds = (logits >= 0.0).long()
+        y_true = y_test.long()
+        tp = int(((preds == 1) & (y_true == 1)).sum().item())
+        fp = int(((preds == 1) & (y_true == 0)).sum().item())
+        tn = int(((preds == 0) & (y_true == 0)).sum().item())
+        fn = int(((preds == 0) & (y_true == 1)).sum().item())
+
+    metrics = BinaryClassificationMetrics(TP=tp, FP=fp, TN=tn, FN=fn)
+    return LSTMClassificationResult(metrics=metrics, model=model)
+
+@dataclass
+class ARIMAClassificationResult:
+    metrics: BinaryClassificationMetrics
+    svm_pipeline: Optional[sklearn.pipeline.Pipeline]
+
+ARIMA_ORDER = (2, 0, 1)  # AR(2), no differencing, MA(1)
+
+def _extract_arima_features_for_session(
+    session_matrix: npt.NDArray[np.float64],
+    order: Tuple[int, int, int] = ARIMA_ORDER,
+) -> npt.NDArray[np.float64]:
+    """
+    Fit ARIMA(p,d,q) independently to each feature column of a session matrix
+    and return a fixed-length feature vector summarizing the temporal dynamics.
+    
+    For each of the D feature dimensions, extracts:
+      - p AR coefficients
+      - q MA coefficients
+      - sigma2 (residual variance)
+      - series mean
+    Total output length = D * (p + q + 2).
+    
+    :param session_matrix: (T, D) array, T timesteps, D features. Already normalized.
+    :param order: (p, d, q) ARIMA order
+    :return: 1-D array of length D * (p + q + 2)
+    """
+    from statsmodels.tsa.arima.model import ARIMA
+    import warnings
+
+    p, d, q = order
+    n_features = session_matrix.shape[1]
+    vec_per_dim = p + q + 2  # AR coeffs + MA coeffs + sigma2 + mean
+    out = np.zeros(n_features * vec_per_dim, dtype=np.float64)
+
+    for dim_i in range(n_features):
+        series = session_matrix[:, dim_i].astype(np.float64)
+        offset = dim_i * vec_per_dim
+        out[offset + p + q + 1] = float(np.mean(series))  # always store mean
+
+        if len(series) < p + d + q + 2:
+            # too short to fit; leave AR/MA/sigma as zeros, mean is set
+            continue
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                model = ARIMA(series, order=order, enforce_stationarity=False, enforce_invertibility=False)
+                res = model.fit(method_kwargs={"maxiter": 50})
+            out[offset: offset + p] = res.arparams[:p]
+            out[offset + p: offset + p + q] = res.maparams[:q]
+            out[offset + p + q] = float(res.sigma2) if np.isfinite(res.sigma2) else 0.0
+        except Exception:
+            pass  # zeros remain as fallback
+
+    # replace any non-finite values
+    out = np.nan_to_num(out, nan=0.0, posinf=0.0, neginf=0.0)
+    return out
+
+
+def classify_using_arima(
+    input_vec_len: int,
+    predictors: List[SwipeFeaturedSessionType],
+    positive_labeled: List[bool],
+    order: Tuple[int, int, int] = ARIMA_ORDER,
+) -> ARIMAClassificationResult:
+    """
+    Fit ARIMA per feature dimension per session to extract fixed-length parameter vectors,
+    then classify with an RBF-SVM. Analogous to LSTM→linear, but ARIMA→SVM.
+    
+    :param input_vec_len: number of feature columns per timestep
+    :param predictors: list of sessions, each with a .features DataFrame (rows=timesteps, cols=features)
+    :param positive_labeled: boolean labels per session
+    :param order: (p, d, q) ARIMA order to use
+    :return: ARIMAClassificationResult with metrics and the trained SVM pipeline
+    """
+    assert len(predictors) == len(positive_labeled), "Predictors and labels must have the same length."
+
+    # Normalize globally across all timesteps
+    sequences = [session.features.to_numpy(dtype=np.float64) for session in predictors]
+    all_features = np.concatenate(sequences, axis=0)
+    mean = all_features.mean(axis=0)
+    std = all_features.std(axis=0)
+    std[std == 0] = 1.0
+    sequences = [(seq - mean) / std for seq in sequences]
+
+    # Extract ARIMA parameter vectors
+    print(f"Extracting ARIMA{order} features for {len(sequences)} sessions...")
+    arima_features = np.array([
+        _extract_arima_features_for_session(seq, order=order)
+        for seq in tqdm.tqdm(sequences, desc="ARIMA fitting")
+    ])  # (n_sessions, n_features * (p + q + 2))
+
+    labels = np.array(positive_labeled, dtype=np.int32)
+
+    # Train/test split
+    if np.unique(labels).size < 2 or np.bincount(labels).min() < 2:
+        raise ValueError("Need at least 2 samples per class for stratified split.")
+
+    X_train, X_test, y_train, y_test = train_test_split(
+        arima_features, labels,
+        test_size=COMPLICATED_MODEL_TEST_SET_SIZE, random_state=42, stratify=labels,
+    )
+
+    if y_test.sum() == 0 or y_test.sum() == len(y_test):
+        raise ValueError("Test set has only one class present, cannot evaluate accuracy.")
+    print(f"Test set has {y_test.sum()} positive samples and {len(y_test) - y_test.sum()} negative samples.")
+
+    # SVM classifier on the ARIMA-derived features
+    svm_clf = make_pipeline(StandardScaler(), SVC(kernel="rbf", probability=True, random_state=42))
+    svm_clf.fit(X_train, y_train)
+    y_pred = svm_clf.predict(X_test)
+
+    tp = int(np.sum((y_pred == 1) & (y_test == 1)))
+    fp = int(np.sum((y_pred == 1) & (y_test == 0)))
+    tn = int(np.sum((y_pred == 0) & (y_test == 0)))
+    fn = int(np.sum((y_pred == 0) & (y_test == 1)))
+
+    metrics = BinaryClassificationMetrics(TP=tp, FP=fp, TN=tn, FN=fn)
+    return ARIMAClassificationResult(metrics=metrics, svm_pipeline=svm_clf)
 
 
 def make_feature_and_learner_table(task_cluster_id: int, method_name: str, 
@@ -753,6 +1085,10 @@ def make_feature_and_learner_table(task_cluster_id: int, method_name: str,
         print(clf_res)
         result_csv.loc["svm_accuracy", [(task_cluster_id, method_name)]] = clf_res["svm_accuracy"]
         result_csv.loc["xgb_accuracy", [(task_cluster_id, method_name)]] = clf_res["xgb_accuracy"]
+        result_csv.loc["svm_tpr", [(task_cluster_id, method_name)]] = clf_res["svm_test_metrics"].recall_or_TPR()
+        result_csv.loc["svm_fpr", [(task_cluster_id, method_name)]] = clf_res["svm_test_metrics"].FPR()
+        result_csv.loc["xgb_tpr", [(task_cluster_id, method_name)]] = clf_res["xgb_test_metrics"].recall_or_TPR()
+        result_csv.loc["xgb_fpr", [(task_cluster_id, method_name)]] = clf_res["xgb_test_metrics"].FPR()
     else:
         raise ValueError("Resulting AUC dataframe is empty.")
 
@@ -783,6 +1119,10 @@ def make_feature_and_learner_table_but_acc(task_cluster_id: int, method_name: st
         print(clf_res)
         result_csv.loc["svm_accuracy", [(task_cluster_id, method_name)]] = clf_res["svm_accuracy"]
         result_csv.loc["xgb_accuracy", [(task_cluster_id, method_name)]] = clf_res["xgb_accuracy"]
+        result_csv.loc["svm_tpr", [(task_cluster_id, method_name)]] = clf_res["svm_test_metrics"].recall_or_TPR()
+        result_csv.loc["svm_fpr", [(task_cluster_id, method_name)]] = clf_res["svm_test_metrics"].FPR()
+        result_csv.loc["xgb_tpr", [(task_cluster_id, method_name)]] = clf_res["xgb_test_metrics"].recall_or_TPR()
+        result_csv.loc["xgb_fpr", [(task_cluster_id, method_name)]] = clf_res["xgb_test_metrics"].FPR()
 
         return result_csv, svm_pipeline, xgb
     else:

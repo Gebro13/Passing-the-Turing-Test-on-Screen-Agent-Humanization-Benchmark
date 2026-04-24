@@ -1,5 +1,6 @@
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import Dict, List, Sequence, Tuple, TypedDict
+import pandas as pd
 from typing_extensions import TypeAlias
 
 @dataclass
@@ -41,3 +42,11 @@ def is_integral(trace: SingularActionType) -> bool:
 
 
 SessionType = Tuple[str, List[SingularActionType]]  # (session_id, list of Events)
+
+@dataclass
+class SwipeFeaturedSessionType:
+    session_id: str
+    # time-ordered sequence of feature dictionaries, or a DataFrame where each row corresponds to a swipe and columns correspond to features
+    features: Sequence[Dict[str, float]] | pd.DataFrame
+
+# a = SwipeFeaturedSessionType(session_id="session_1", features=[{"feature1": 0.5, "feature2": 1.0}, {"feature1": 0.3, "feature2": 0.8}])
