@@ -1,4 +1,4 @@
-from typing import Final, Optional, List, Dict, Tuple, Callable, Union
+from typing import Any, Final, Optional, List, Dict, Tuple, Callable, Union
 import re
 from re import Match
 from unittest import result
@@ -7,6 +7,9 @@ from pathlib import Path
 import pandas as pd
 import os
 from functools import partial
+import logging
+
+logger = logging.getLogger(__name__)
 
 def hex_to_dec(hex_str: str) -> int:
     return int(hex_str, 16)
@@ -119,10 +122,10 @@ def single_trace_generator(adb_getevent_generator: List[str]) -> List[SingularAc
 
 
         if key_match is not None:
-            # print(f"Warning: EV_KEY event found in line, which is unexpected but not disruptive: {line}")
+            logger.debug("EV_KEY event found in line, which is unexpected but not disruptive: %s", line.rstrip())
             pass
         if syn_config_in_line:
-            print(f"Warning: SYN_CONFIG found in line, which is unexpected but not disruptive: {line}")
+            logger.warning("SYN_CONFIG found in line, which is unexpected but not disruptive: %s", line.rstrip())
         if multitouch_match is not None:
             raise NotImplementedError(f"Multitouch event found in line, which is unexpected and currently not supported: {line}")
 
@@ -198,6 +201,7 @@ def single_trace_generator(adb_getevent_generator: List[str]) -> List[SingularAc
             
             if (x is None) or (y is None):
                 exist_incomplete_sample = True
+                logger.debug("Incomplete sample detected in line: %s. This may indicate an unexpected log format or missing lines. The generated trace may contain incomplete samples with None values.", line)
                 # This means that the resulting trace may have none as result. 
                 # raise ValueError(f"Unexpected log format: incomplete sample before SYN_REPORT: {line}")
 
@@ -212,8 +216,13 @@ def single_trace_generator(adb_getevent_generator: List[str]) -> List[SingularAc
                 # currently current_gesture must have length > 0.
                 result.append(current_gesture)
                 current_gesture = []    
-            
-    if (not last_is_syn_report) or (not inherited_id == TERMINATION_ID) or (len(current_gesture) > 0):
+    
+    log_ended_without_proper_termination = (not last_is_syn_report) or (not inherited_id == TERMINATION_ID) or (len(current_gesture) > 0)
+
+    if log_ended_without_proper_termination and exist_incomplete_sample:
+        raise ValueError(f"Multiple Unexpected log format: log ended without proper termination and at least one incomplete sample detected. This may indicate missing lines or some other log format issue. Please check the logs for details. The generated trace may contain incomplete samples with None values and the last trace may be incomplete.", result, current_gesture)
+
+    if log_ended_without_proper_termination:
         raise ValueError(f"Unexpected log format: log ended without proper termination. last_is_syn_report: {last_is_syn_report}, inherited_id: {inherited_id}, len(current_gesture): {len(current_gesture)}", result, current_gesture)
 
     if exist_incomplete_sample:
@@ -223,7 +232,7 @@ def single_trace_generator(adb_getevent_generator: List[str]) -> List[SingularAc
 
 
 def null_object_warning() -> None:
-    print("Null item detected. These guards are useful after all.")
+    logger.error("Null item detected. These guards are useful after all.")
 
 def gesture_generator_from_files(df_idx: pd.DataFrame, logs_dir: Path) -> List[Tuple[str, str, List[SingularActionType]]]:
     """Read df_idx(the catalog of logs), iterate logs, extract unmodified swipes, and return a List of Lists.
@@ -237,6 +246,7 @@ def gesture_generator_from_files(df_idx: pd.DataFrame, logs_dir: Path) -> List[T
         # Construct file name like draw_motion_event2 defaults
         log_file = logs_dir / f"gesture_recording_{log_num}.log"
         if not log_file.exists():
+            raise DeprecationWarning("df_idx rather outdated. Fix this before fixing the logging.")
             print(f"Missing log: {log_file}")
             continue
 
@@ -308,11 +318,11 @@ def check_integrity_of_logs(df_idx: pd.DataFrame, logs_dir: Path) -> None:
         if not log_file.exists():
             missing_logs.append(log_file)
     if missing_logs:
-        print("Missing log files:")
+        logger.warning("Missing log files:")
         for log in missing_logs:
-            print(f" - {log}")
+            logger.warning(" - %s", log)
     else:
-        print("All log files are present.")
+        logger.info("All log files are present.")
 
     # check that every yielded swipe is not None
     for participant_tag, session_timestamp, gesture_iterator in gesture_generator_from_files(df_idx, logs_dir):
@@ -328,11 +338,22 @@ def stack_iterator_with_str(label: str, items: List[SingularActionType]) -> List
     """Stack a label alongside each item in a list."""
     return [(label, item) for item in items]
 
+def throw_away_sample_with_none(thingy_to_filter: List[Any]) -> List[SingularActionType]:
+    accumulator: List[SingularActionType] = []
+    for item in reversed(thingy_to_filter):
+        if not is_integral(item):
+            break
+        accumulator.append(item)
+    single_trace_generated = list(reversed(accumulator))
+    return single_trace_generated
+
+
+
 def ranged_batched_modified_generator_with_session_timestamp(
         formated_data_timestamps: pd.DataFrame, 
         participants: List[str], 
         index_range: Optional[List[int]] = None, 
-        filtering_and_modification_function: Optional[
+        batched_filtering_and_modification_function: Optional[
             Callable[[List[SingularActionType]], List[SingularActionType]]
         ] = None, 
         humanity_disturbance: Optional[
@@ -361,13 +382,13 @@ def ranged_batched_modified_generator_with_session_timestamp(
 
             # assert that the timestamp follow the yyyymmdd_hhmmss format, otherwise the log format is unexpected and we raise an error.
             if not re.match(r'^\d{8}_\d{6}$', stripped_timestamp):
-                print(f"Unexpected timestamp format for participant {participant_name} at index {index}: '{timestamp}'")
+                logger.warning("Unexpected timestamp format for participant %s at index %d: '%s'", participant_name, index, timestamp)
                 continue
             
             try:
                 file_path = file_finder(Path("logs/"), "gesture_recording_" + stripped_timestamp + ".log")
             except FileNotFoundError as e:
-                print(participant_name, e)
+                logger.error("%s: %s", participant_name, e)
                 raise e
             line_generator = file_reader_yield(str(file_path))
 
@@ -375,39 +396,40 @@ def ranged_batched_modified_generator_with_session_timestamp(
                 single_trace_generated = single_trace_generator(line_generator)
                 
             except ValueError as e:
+                if "Multiple Unexpected log format" in e.args[0]:
+                    logger.warning("Error processing file %s: %s. Multiple unexpected log format issues encountered.", file_path, e.args[0])
+                    thingy_to_filter = e.args[1] # the generated trace with potential None samples and the last trace with potential incomplete sample.
+                    single_trace_generated = throw_away_sample_with_none(thingy_to_filter) # the generated trace with None samples and the last incomplete sample thrown away.
+                    logger.warning("Kept %d complete samples from all %d samples in the generated trace.", len(single_trace_generated), len(thingy_to_filter))
+
                 if "incomplete sample" in e.args[0]:
-                    print(f"Warning: Incomplete sample detected in file {file_path}. This may indicate an unexpected log format or missing lines. Keeping the traces with complete properties.")
-                    thingy_to_filter = e.args[1]
-                    accumulator: List[SingularActionType] = []
-                    for item in reversed(thingy_to_filter):
-                        if not is_integral(item):
-                            break
-                        accumulator.append(item)
-                    single_trace_generated = list(reversed(accumulator))
-                    print(f"Kept {len(single_trace_generated)} complete samples from all {len(thingy_to_filter)} samples in the generated trace.")
+                    logger.warning("Incomplete sample detected in file %s. This may indicate an unexpected log format or missing lines. Keeping the traces with complete properties.", file_path)
+                    thingy_to_filter = e.args[1] # the generated trace with potential None samples.
+                    single_trace_generated = throw_away_sample_with_none(thingy_to_filter) # the generated trace with None samples thrown away.
+                    logger.warning("Kept %d complete samples from all %d samples in the generated trace.", len(single_trace_generated), len(thingy_to_filter))
 
                 elif "without proper termination" in e.args[0]:
-                    print(f"Warning: Error processing file {file_path}: {e.args[0]}. Discarding the last incomplete trace.")
+                    logger.warning("Error processing file %s: %s. Discarding the last incomplete trace.", file_path, e.args[0])
                     single_trace_generated = e.args[1] # compact stacked traces are contact.
 
                 elif "invalid id inheritance" in e.args[0]:
-                    print(f"Error processing file {file_path}: {e}. Skipping this file.")
+                    logger.error("Error processing file %s: %s. Skipping this file.", file_path, e)
                     continue
 
                 else:
-                    print(f"Error processing file {file_path}: {e}")
+                    logger.error("Error processing file %s: %s", file_path, e)
                     raise e
 
             except NotImplementedError as e:
                 if "Multitouch event found in line" in e.args[0]:
-                    print(f"Warning: Multitouch event found in file {file_path}, which is unexpected and currently not supported. Skipping this file.")
+                    logger.warning("Multitouch event found in file %s, which is unexpected and currently not supported. Skipping this file.", file_path)
                     continue
                 else:
-                    print(f"Error processing file {file_path}: {e}")
+                    logger.error("Error processing file %s: %s", file_path, e)
                     raise e
 
-            if filtering_and_modification_function is not None:
-                swipe_generated = filtering_and_modification_function(single_trace_generated)
+            if batched_filtering_and_modification_function is not None:
+                swipe_generated = batched_filtering_and_modification_function(single_trace_generated)
             else:
                 swipe_generated = single_trace_generated
             if humanity_disturbance is not None:
@@ -415,7 +437,7 @@ def ranged_batched_modified_generator_with_session_timestamp(
                     humanity_disturbance(swipe_without_final_point)
                     for swipe_without_final_point in swipe_generated
                 ]
-            result.append((stripped_timestamp, swipe_generated))
+            result.append((stripped_timestamp, swipe_generated)) # TODO unrigorous constructor for SessionType. Change to TypedDict in the future. 
     return result
 
 
@@ -423,7 +445,7 @@ def ranged_batched_modified_generator_without_session_timestamp(
         formated_data_timestamps: pd.DataFrame, 
         participants: List[str], 
         index_range: Optional[List[int]] = None, 
-        filtering_and_modification_function: Optional[
+        batched_filtering_and_modification_function: Optional[
             Callable[[List[SingularActionType]], List[SingularActionType]]
         ] = None, 
         humanity_disturbance: Optional[
@@ -437,7 +459,7 @@ def ranged_batched_modified_generator_without_session_timestamp(
             formated_data_timestamps=formated_data_timestamps,
             participants=participants,
             index_range=index_range,
-            filtering_and_modification_function=filtering_and_modification_function,
+            batched_filtering_and_modification_function=batched_filtering_and_modification_function,
             humanity_disturbance=humanity_disturbance
         )
     result: List[SingularActionType] = []
@@ -471,7 +493,7 @@ def ranged_modified_generator_without_session_timestamp(
             formated_data_timestamps=formated_data_timestamps,
             participants=participants,
             index_range=index_range,
-            filtering_and_modification_function=batched_modifying_function,
+            batched_filtering_and_modification_function=batched_modifying_function,
             humanity_disturbance=humanity_disturbance
         )
 
@@ -501,7 +523,7 @@ def ranged_modified_generator_with_session_timestamp(
             formated_data_timestamps=formated_data_timestamps,
             participants=participants,
             index_range=index_range,
-            filtering_and_modification_function=batched_modifying_function,
+            batched_filtering_and_modification_function=batched_modifying_function,
             humanity_disturbance=humanity_disturbance
         )
 

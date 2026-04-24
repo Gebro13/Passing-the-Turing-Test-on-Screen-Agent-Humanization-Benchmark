@@ -500,7 +500,7 @@ try:
                 print(f"Received timestamp: {timestamp}")
                 write_timestamp_to_idx(TASK_CSV_PATH, column_namer, empty_row_idx, timestamp)
                 time.sleep(2.0)
-            time.sleep(30.0) # so that the data pulling can be done
+            time.sleep(30.0) # so that the data pulling can be done before the data collection session is killed. TODO move it to outside loop
             os.system("tmux kill-session -t " + default_data_collection_session_name)
             prepared_agent_object.destroy()
             print(f"All experiments for {column_namer} done.")

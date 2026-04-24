@@ -110,6 +110,7 @@ if __name__ == "__main__":
     try:
         with open(automations.TIMESTAMP_RECORDER, "w") as f:
             f.write(timestamp + "\n")
+        print(f"Recording started with timestamp {timestamp}.")
         input(f"Press Enter to stop recording...   {timestamp}")
     except KeyboardInterrupt:
         pass
