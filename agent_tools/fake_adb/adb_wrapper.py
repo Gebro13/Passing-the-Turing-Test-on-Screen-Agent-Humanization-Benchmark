@@ -39,11 +39,12 @@ try:
     from analysis.lib.motionevent_classes import GotEvent, FingerEvent, SingularActionType, is_integral
     from analysis.processing.fit_effort_provider import FitEffortProvider, bot_line_fit
     from analysis.processing.fit_effort_provider import tap as fit_effort_provider_tap
-    from analysis.lib.feature_library import PhysicallyCorrectSingleSwipeType
+    from analysis.lib.feature_library import PhysicallyCorrectSingleSwipeType, swipe_judger_v2, extend_PhysicallyCorrectSingleSwipeType_to_SingularActionType
+    from analysis.lib.gesture_log_reader_utils import file_finder, file_reader_yield, single_trace_generator
 
 except ImportError as e:
     print(f"Wrapper Error: Could not import dependencies: {e}", file=sys.stderr)
-    sys.exit(1)
+    raise e
 
 with open(SELF_FOLDER / "adb_wrapper_config.json", "r") as f:
     config = json.load(f)
@@ -128,18 +129,6 @@ def log_special_key(key_name: str) -> None:
     raw_log_str(f"{get_current_phone_timestamp()} <{key_name}>\n")
 
 
-def extend_PhysicallyCorrectSingleSwipeType_to_SingularActionType(swipe: PhysicallyCorrectSingleSwipeType) -> SingularActionType:
-    """
-        Warning: This function modifies the input swipe in place.
-    """
-    
-    end_upfinger_time_us = 50000 # legacy time; shouldn't matter under the current handling
-    last_time_us = swipe[-1].timestamp_us
-    last_x = swipe[-1].x
-    last_y = swipe[-1].y
-    swipe.append(FingerEvent(timestamp_us=last_time_us + end_upfinger_time_us, x=last_x, y=last_y))
-    return swipe
-
 def load_PhysicallyCorrectSingleSwipeType_pickle(pkl_path: Path) -> List[SingularActionType]:
     with open(pkl_path, "rb") as f:
         loaded_data: List[PhysicallyCorrectSingleSwipeType] = pickle.load(f)
@@ -152,6 +141,16 @@ def load_PhysicallyCorrectSingleSwipeType_pickle(pkl_path: Path) -> List[Singula
 
     return loaded_data
 
+
+def load_swipes_from_single_file(log_path: Path) -> List[SingularActionType]:
+    file_lines = file_reader_yield(file_path=log_path)
+    traces = single_trace_generator(file_lines)
+    swipes: List[SingularActionType] = []
+    for trace in traces:
+        if swipe_judger_v2(trace):
+            swipes.append(trace)
+
+    return swipes
 
 class MotionGenerator:
     static_fit_effort_provider: Optional[FitEffortProvider] = None
@@ -425,11 +424,8 @@ class MotionGenerator:
         :param height: Description
         :param evdev: Description
         """
-        # choose a random point in the screen center area
 
         radius = 50
-        # center_x = random.randint(width//4 + radius, 3*width//4 - radius)
-        # center_y = random.randint(height//4 + radius, 3*height//4 - radius)
         center_x, center_y = MotionGenerator.read_tap_positions()
 
         fake_action_trace: List[FingerEvent] = []

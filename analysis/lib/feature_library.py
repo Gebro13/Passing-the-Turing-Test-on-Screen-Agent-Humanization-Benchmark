@@ -2,9 +2,6 @@ import os
 import pandas as pd
 import numpy as np
 import pickle
-from collections import defaultdict
-from tqdm import tqdm
-import matplotlib.pyplot as plt
 from typing import Any, List, Dict, Tuple, Union
 from copy import deepcopy
 from analysis.lib.motionevent_classes import FingerEvent, SingularActionType, END_SAMPLE_XY_IDX
@@ -36,6 +33,7 @@ def euclidean_distance(x1: float, y1: float, x2: float, y2: float) -> float:
 def pixel_length(swipe: SingularActionType) -> int:
     return len(swipe)
 
+# not "totally correct"; since SingularActionType if interpreted literally, the last point halts, which is incorrect physically. Most features doesn't care about this issue. But that doesn't mean we can just throw away the last point; the current analysis is just a make-do. 
 PhysicallyCorrectSingleSwipeType = List[FingerEvent]
 
 def transform_to_physically_correct_single_swipe_type(trace: SingularActionType) -> PhysicallyCorrectSingleSwipeType:
@@ -44,6 +42,17 @@ def transform_to_physically_correct_single_swipe_type(trace: SingularActionType)
     """
     return deepcopy(trace[:-1])
 
+def extend_PhysicallyCorrectSingleSwipeType_to_SingularActionType(swipe: PhysicallyCorrectSingleSwipeType) -> SingularActionType:
+    """
+        Warning: This function modifies the input swipe in place.
+    """
+    
+    end_upfinger_time_us = 50000 # legacy time; shouldn't matter under the current handling
+    last_time_us = swipe[-1].timestamp_us
+    last_x = swipe[-1].x
+    last_y = swipe[-1].y
+    swipe.append(FingerEvent(timestamp_us=last_time_us + end_upfinger_time_us, x=last_x, y=last_y))
+    return swipe
 
 def endT_us(swipe: SingularActionType) -> int:
     """
@@ -597,7 +606,16 @@ def swipe_judger(single_finger_trace: SingularActionType) -> bool:
         return False
     return True
 
+def swipe_judger_v2(single_finger_trace: SingularActionType) -> bool:
+    """
+    Judge whether the trace is a swipe by total length.  
+    return true if a swipe.
+    """
+    TAP_THRESHOLD = 10.0     # pixels
 
+    if length_of_swipe(transform_to_physically_correct_single_swipe_type(single_finger_trace)) < TAP_THRESHOLD:
+        return False
+    return True
 
 
 
@@ -664,27 +682,7 @@ def swipe_judger(single_finger_trace: SingularActionType) -> bool:
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+FEATURE_LENGTH = 24
 
 
 # Feature Engineering
@@ -788,5 +786,6 @@ def extract_features(swipe: SingularActionType) -> Dict[str, float]:
     # If quadrant feature makes sense ?
     # print(sorted(list(X.keys())))
     # print(final_X)
+    assert len(X) == FEATURE_LENGTH, f"Expected {FEATURE_LENGTH} features, but got {len(X)}. Check the feature extraction code."
     return X
 

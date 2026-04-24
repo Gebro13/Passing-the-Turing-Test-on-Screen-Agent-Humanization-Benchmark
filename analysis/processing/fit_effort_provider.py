@@ -1,8 +1,8 @@
 # The goal is to provide a class that can yield swipes according to the (x1, y1) -> (x2, y2) requirement.
 
 from analysis.lib.motionevent_classes import FingerEvent, SingularActionType
-from analysis.lib.feature_library import euclidean_distance, startX, startY, endX, endY
-from typing import List, Tuple
+from analysis.lib.feature_library import euclidean_distance, startX, startY, endX, endY, extend_PhysicallyCorrectSingleSwipeType_to_SingularActionType
+from typing import List, Optional, Tuple
 import numpy as np
 import pickle
 import numpy.typing as npt
@@ -36,6 +36,10 @@ def bot_line_fit(x1: int, y1: int, x2: int, y2: int, duration_us: int, neighbor_
     trace.append(FingerEvent(timestamp_us=last_time_us + end_upfinger_time_us, x=x2, y=y2))
 
     return trace
+
+TBD_END_UPFINGER_TIME_US = 11000 # this value, under the current throwaway implementation, should not affect the final result. Note that it is different from adb wrapper, which use 50000 liftup.
+def raw_faker(event_list: SingularActionType) -> SingularActionType:
+    return bot_line_fit(x1=startX(event_list), y1=startY(event_list), x2=endX(event_list), y2=endY(event_list), duration_us=500 * 1000, neighbor_time_delta_us=11000, end_upfinger_time_us=TBD_END_UPFINGER_TIME_US)
 
 def extract_exact_swipe_batch(label: str, swipe_file_generator: List[Tuple[str, List[SingularActionType]]]) -> List[SingularActionType]:
     # actually somewhat like draw_motion_event_multi_file.chain_gesture_iterators
@@ -91,6 +95,7 @@ class FitEffortProvider:
         self.swipe_batches = swipe_batches
 
     def dump_batches(self, name: str = "swipe_data.pkl") -> None:
+        raise NotImplementedError("Previously PhysicallyCorrectSingleSwipeType was generated and pickled in a separate script. After the recent refactor, we should pickle SingularActionType instead, which contain  and can be transformed to PhysicallyCorrectSingleSwipeType on the fly if needed. ")
         with open(name, "wb") as f:
             pickle.dump(self.swipe_batches, f)
 
@@ -109,7 +114,6 @@ class FitEffortProvider:
 
 
 def b_spline_faker(trace: SingularActionType, neighbor_time_delta_us: float) -> SingularActionType:
-    # TODO what to do about the vanishing point
 
     # Implement B-spline fitting and noise addition here
     # add b-spline noise to t, x, y
@@ -151,10 +155,10 @@ def b_spline_faker(trace: SingularActionType, neighbor_time_delta_us: float) -> 
     new_t -= np.min(new_t)  # shift to start at zero
     new_t = np.maximum.accumulate(new_t)
 
-    # write back into trace
-    for i, pt in enumerate(trace):
-        pt.timestamp_us = int(new_t[i])
-        pt.x            = int(new_x[i])
-        pt.y            = int(new_y[i])
+    new_trace: List[FingerEvent] = []
+    for t, x, y in zip(new_t, new_x, new_y):
+        new_trace.append(FingerEvent(timestamp_us=int(t), x=int(x), y=int(y)))
 
-    return trace
+    new_trace_complete = extend_PhysicallyCorrectSingleSwipeType_to_SingularActionType(new_trace) # ensure the trace is still a valid SingularActionType after modification, and can be transformed to PhysicallyCorrectSingleSwipeType on the fly if needed. This is a safety check and may raise an error if the noise addition causes some issues.
+
+    return new_trace_complete
