@@ -1,12 +1,13 @@
 # The goal is to provide a class that can yield swipes according to the (x1, y1) -> (x2, y2) requirement.
 
 from analysis.lib.motionevent_classes import FingerEvent, SingularActionType
-from analysis.lib.feature_library import euclidean_distance, startX, startY, endX, endY, extend_PhysicallyCorrectSingleSwipeType_to_SingularActionType
-from typing import List, Optional, Tuple
+from analysis.lib.feature_library import euclidean_distance, startX, startY, endX, endY, extend_PhysicallyCorrectSingleSwipeType_to_SingularActionType, directionless_displacement, get_direction
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple, cast
 import numpy as np
 import pickle
 import numpy.typing as npt
 from scipy.interpolate import splrep, splev
+from pathlib import Path
 
 def tap(x: int, y: int, start_us: int, duration_us: int) -> SingularActionType:
     """
@@ -60,7 +61,7 @@ def calculated_distance_to_required(swipe_batches: List[SingularActionType], x1:
         fitted_batches.append(swipe)
     return distances, fitted_batches
 
-def sample_from_softmax_inv_distance(distances: List[float], fitted_batches: List[SingularActionType], softmax_temperature: float) -> SingularActionType:
+def sample_from_softmax_inv_distance(distances: List[float], fitted_batches: List[SingularActionType], softmax_temperature: float, random_generator: Optional[np.random.Generator] = None) -> SingularActionType:
     """
         softmax_temperature between (0, +inf)
     """
@@ -69,7 +70,10 @@ def sample_from_softmax_inv_distance(distances: List[float], fitted_batches: Lis
     exp_inv_distances = np.exp(- distances_np / softmax_temperature)
     probabilities = exp_inv_distances / np.sum(exp_inv_distances)
 
-    sampled_indices = np.random.choice(len(fitted_batches), size=1, p=probabilities).item()
+    if random_generator is None:
+        random_generator = np.random.default_rng()
+
+    sampled_indices = random_generator.choice(len(fitted_batches), size=1, p=probabilities).item()
     return fitted_batches[sampled_indices]
 
 def drag_and_fit(x1: int, y1: int, x2: int, y2: int, original_swipe: SingularActionType) -> SingularActionType:
@@ -90,9 +94,27 @@ def drag_and_fit(x1: int, y1: int, x2: int, y2: int, original_swipe: SingularAct
 
     return transformed_swipe
 
+def drag_to_start(x1: int, y1: int, original_swipe: SingularActionType) -> SingularActionType:
+    # only translate the original swipe to fit the starting point, without scaling and rotation, which is a simpler version of drag_and_fit. 
+    transformed_swipe: List[FingerEvent] = []
+    delta_x = x1 - startX(original_swipe)
+    delta_y = y1 - startY(original_swipe)
+
+    for event in original_swipe:
+        new_x = event.x + delta_x
+        new_y = event.y + delta_y
+        transformed_swipe.append(FingerEvent(timestamp_us=event.timestamp_us, x=new_x, y=new_y))
+
+    return transformed_swipe
+
 class FitEffortProvider:
-    def __init__(self, swipe_batches: List[SingularActionType]):
+    def __init__(self, swipe_batches: List[SingularActionType], temperature: float = 100.0, random_state: Optional[int] = None) -> None:
         self.swipe_batches = swipe_batches
+        self.temperature = temperature
+        if random_state is not None:
+            self.numpy_compatible_rng = np.random.default_rng(seed=random_state)
+        else:
+            self.numpy_compatible_rng = None
 
     def dump_batches(self, name: str = "swipe_data.pkl") -> None:
         raise NotImplementedError("Previously PhysicallyCorrectSingleSwipeType was generated and pickled in a separate script. After the recent refactor, we should pickle SingularActionType instead, which contain  and can be transformed to PhysicallyCorrectSingleSwipeType on the fly if needed. ")
@@ -102,8 +124,15 @@ class FitEffortProvider:
     def fit(self, x1: int, y1: int, x2: int, y2: int) -> SingularActionType:
         """sample and fit a good swipe"""
         distances, obtained_batches = calculated_distance_to_required(self.swipe_batches, x1, y1, x2, y2)
-        sampled_swipe = sample_from_softmax_inv_distance(distances, obtained_batches, softmax_temperature=100.0)
+        sampled_swipe = sample_from_softmax_inv_distance(distances, obtained_batches, softmax_temperature=self.temperature, random_generator=self.numpy_compatible_rng)
         fitted_swipe = drag_and_fit(x1, y1, x2, y2, sampled_swipe)
+        return fitted_swipe
+    
+    def fit_only_start(self, x1: int, y1: int, x2: int, y2: int) -> SingularActionType:
+        """only fit the starting point, which is a simpler version of fit, and can be used when we only care about the starting point, or when the original swipe is already good enough in terms of displacement vector but just has a wrong starting point."""
+        distances, obtained_batches = calculated_distance_to_required(self.swipe_batches, x1, y1, x2, y2)
+        sampled_swipe = sample_from_softmax_inv_distance(distances, obtained_batches, softmax_temperature=self.temperature, random_generator=self.numpy_compatible_rng)
+        fitted_swipe = drag_to_start(x1, y1, sampled_swipe)
         return fitted_swipe
 
     def humanity_disturbance(self, original_swipe: SingularActionType) -> SingularActionType:
@@ -138,9 +167,9 @@ def b_spline_faker(trace: SingularActionType, neighbor_time_delta_us: float) -> 
     tck_y = splrep(np.arange(n), rand_y, k=k, t=knots)
 
     # evaluate smooth noise
-    noise_t = splev(np.arange(n), tck_t)
-    noise_x = splev(np.arange(n), tck_x)
-    noise_y = splev(np.arange(n), tck_y)
+    noise_t = np.asarray(splev(np.arange(n), tck_t), dtype=np.float64)
+    noise_x = np.asarray(splev(np.arange(n), tck_x), dtype=np.float64)
+    noise_y = np.asarray(splev(np.arange(n), tck_y), dtype=np.float64)
 
     # scale factors for noise amplitude
     eps_t  = neighbor_time_delta_us * 0.2

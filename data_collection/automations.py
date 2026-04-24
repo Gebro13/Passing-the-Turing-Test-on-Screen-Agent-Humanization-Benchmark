@@ -1,3 +1,4 @@
+from enum import Enum
 import os
 import sys
 import time
@@ -55,6 +56,16 @@ stop_event = threading.Event()
 resume_event = threading.Event()
 
 
+# create a enum class of "custom_fake_action_3", "custom_fake_action_4", "custom_fake_action_5" and make sure it is validated
+# now begin:
+class CustomFakeAction(Enum):
+    CUSTOM_FAKE_ACTION_3 = "custom_fake_action_3"
+    CUSTOM_FAKE_ACTION_4 = "custom_fake_action_4"
+    CUSTOM_FAKE_ACTION_5 = "custom_fake_action_5"
+
+
+current_fake_action = CustomFakeAction.CUSTOM_FAKE_ACTION_3
+
 def run_useless_action_loop_method_2(mean_interval_seconds: float = 1.1):
     """
     Perform useless micro-swipes at random intervals.
@@ -71,7 +82,7 @@ def run_useless_action_loop_method_2(mean_interval_seconds: float = 1.1):
         # get the absolute path of the file
         fake_adb_py_path = FAKE_ADB_PATH_ABSOLUTE / "adb_wrapper.py"
 
-        os.system(f"python {fake_adb_py_path} shell input fake custom_fake_action_3 2> /dev/null")
+        os.system(f"python {fake_adb_py_path} shell input fake {current_fake_action.value} 2> /dev/null")
 
 
 
@@ -213,9 +224,8 @@ class AgentLauncher(ABC):
         os.system(f"echo 'launched {self.name} experiment on date ' $(date) >> experiment_log.txt")
         os.system(f"echo \'experiment name: {experiment_name}\' >> experiment_log.txt")
 
-        random_hex_name = hex(random.randint(0, 2**32 - 1))[2:]
-        previous_path = PROJ_FOLDER_ABSOLUTE / "logs" / f"agent_output_{random_hex_name}.txt"
-        self._redirect_tmux_output_to_file(previous_path)
+        target_path = PROJ_FOLDER_ABSOLUTE / "logs" /  f"agent_output_{timestamp}.txt"
+        self._redirect_tmux_output_to_file(target_path)
         
         resume_event.set()   # resume fake action generation
 
@@ -226,8 +236,6 @@ class AgentLauncher(ABC):
 
         resume_event.clear()  # halt fake action generation
 
-        target_path = PROJ_FOLDER_ABSOLUTE / "logs" /  f"agent_output_{timestamp}.txt"
-        os.rename(previous_path, target_path)
 
 
     def do_an_experiment(self, callable_app_launch: Callable[[], None], experiment_name: str, timeout_seconds: int = 1800) -> str:
@@ -377,7 +385,7 @@ class OpenAutoGLMLauncher(AgentLauncher):
         os.system(f"tmux send-keys -t {tmux_session_name} \"source environment_variables.sh\" Enter")
 
     def async_invoke_agent(self, experiment_name: str):
-        os.system(f"tmux send-keys -t {self.session_name} \'python main.py --base-url $BASE_URL --model $MODEL_NAME --apikey $API_KEY {experiment_name} ; echo idle > {self.recording_file_path_absolute}\' Enter")
+        os.system(f"tmux send-keys -t {self.session_name} \'python main.py --base-url $BASE_URL --model $MODEL_NAME --apikey $API_KEY \'\"\'{experiment_name}\'\"\' ; echo idle > {self.recording_file_path_absolute}\' Enter")
 
     def _open_autoglm_activate_in_case_of_stuck(self):
         """
@@ -468,7 +476,7 @@ try:
         print("Continuing to experiments...")
 
     if __name__ == "__main__":
-        for agent_factory, column_namer in [
+        for agent_factory, column_namer, to_set_fake_action in [
             # collect raw for example. Change accordingly for other experiments.
             (UiTarsLauncher, "ui_tars_raw"),
             (MobileAgentELauncher_gpt_4o_2024_11_20, "mobile_agent_e_gpt_4o_1228_raw"),
@@ -476,6 +484,9 @@ try:
             (CpmGuiAgentLauncher, "cpm_gui_agent_humanity_rotate"),
             (OpenAutoGLMLauncher, "open_autoglm_agent_raw"),
         ]:
+            
+            current_fake_action = to_set_fake_action
+
             prepared_agent_object = agent_factory()
             prepare_data_collection_session(default_data_collection_session_name)
             experiment_func = prepared_agent_object.do_an_experiment
@@ -503,6 +514,8 @@ except Exception as e:
             # Here we just let it be daemon so it will exit when main program exits
     for agent_name in automations_agents_config.keys():
         session_name = session_name_constructor(agent_name)
+        # wait until any process inside the session is halted, then kill the session
+        
         os.system(f"tmux kill-session -t {session_name}")
 
     # send enter to data collection session to halt it

@@ -450,6 +450,112 @@ class MotionGenerator:
         fake_action_trace.append(FingerEvent(timestamp_us=last_time_us + 15000, x=center_x + radius, y=center_y))
         trace_gotevent = MotionGenerator.swipe_to_event_trace(trace=fake_action_trace, evdev=evdev)
         MotionGenerator.flush_event_sequence(adb_path, evdev, trace_gotevent)
+
+    @staticmethod
+    def custom_fake_action_4(adb_path, evdev: str = GLOBAL_TOUCH_DEVICE):
+        # one-shot anyway.
+
+        log_path = file_finder(PROJ_FOLDER / "logs", "loopy3.log")
+        traces = load_swipes_from_single_file(log_path)
+        print(f"Loaded {len(traces)} swipe traces from {log_path}")
+        generator_loops = FitEffortProvider(traces, 5)
+
+        start_x, start_y = MotionGenerator.read_tap_positions()
+        trace = generator_loops.fit_only_start(start_x, start_y, start_x, start_y)
+        # print(trace)
+        trace_gotevent = MotionGenerator.swipe_to_event_trace(trace=trace, evdev=evdev)
+        MotionGenerator.flush_event_sequence(adb_path, evdev, trace_gotevent)
+
+
+    @staticmethod
+    def _bezier_closed_loop_trace(center_x: int, center_y: int,
+                                   num_events: int = 300,
+                                   radius: float = 200.0) -> List[FingerEvent]:
+        """
+        Analytically-constructed degree-5 Bézier closed curve.
+
+        Control points P0..P5 with constraints:
+          P0 = P5 = C            (closed loop)
+          P1 = P0, P4 = P5       (zero velocity at t=0 and t=1)
+        leaving P2, P3 as free interior points that shape the loop.
+
+        The curve B(t) = sum_{i=0}^{5} C(5,i) (1-t)^(5-i) t^i P_i
+        satisfies B'(0)=5(P1-P0)=0 and B'(1)=5(P5-P4)=0 analytically.
+
+        We randomize:
+          - base_angle:  orientation of the loop
+          - aspect:      eccentricity of the loop (how elongated)
+          - total_time:  duration in microseconds
+        """
+        # random loop orientation and shape
+        base_angle = random.uniform(0, 2 * math.pi)
+        aspect = random.uniform(0.4, 1.0)  # ratio of minor to major axis
+        total_time_us = random.randint(400000, 700000) * 4  # 400-700 ms
+
+        # P2 and P3 offsets from center — placed on opposite sides to form a loop
+        # P2 is displaced at (base_angle + pi/2), P3 at (base_angle - pi/2)
+        # with a forward push along base_angle to create the bulge
+        forward = radius
+        lateral = radius * aspect
+
+        p2_dx = forward * math.cos(base_angle) + lateral * math.cos(base_angle + math.pi / 2)
+        p2_dy = forward * math.sin(base_angle) + lateral * math.sin(base_angle + math.pi / 2)
+        p3_dx = forward * math.cos(base_angle) + lateral * math.cos(base_angle - math.pi / 2)
+        p3_dy = forward * math.sin(base_angle) + lateral * math.sin(base_angle - math.pi / 2)
+
+        # control points (as offsets from center):
+        # P0 = P1 = (0,0),  P4 = P5 = (0,0),  P2, P3 are the free ones
+        # B(t) = C + displacement(t)
+        # displacement(t) = C(5,2)(1-t)^3 t^2 * d2 + C(5,3)(1-t)^2 t^3 * d3
+        #                  = 10(1-t)^3 t^2 * d2 + 10(1-t)^2 t^3 * d3
+        c52 = 10  # C(5,2)
+        c53 = 10  # C(5,3)
+
+        trace: List[FingerEvent] = []
+        for i in range(num_events + 1):
+            t = i / num_events
+            s = 1.0 - t
+            # basis values for the two free control points
+            b2 = c52 * (s ** 3) * (t ** 2)
+            b3 = c53 * (s ** 2) * (t ** 3)
+
+            dx = b2 * p2_dx + b3 * p3_dx
+            dy = b2 * p2_dy + b3 * p3_dy
+
+            x = int(round(center_x + dx))
+            y = int(round(center_y + dy))
+            timestamp_us = int(total_time_us * t)
+            trace.append(FingerEvent(timestamp_us=timestamp_us, x=x, y=y))
+
+        # hold at center for a few extra frames to ensure zero-velocity landing
+        last_ts = trace[-1].timestamp_us
+        for k in range(3):
+            trace.append(FingerEvent(timestamp_us=last_ts + (k + 1) * GLOBAL_EVENT_INTERVAL_US,
+                                     x=center_x, y=center_y))
+
+        # final finger-up marker
+        up_ts = trace[-1].timestamp_us + 5000
+        trace.append(FingerEvent(timestamp_us=up_ts, x=center_x, y=center_y))
+
+        return trace
+
+    @staticmethod
+    def custom_fake_action_5(adb_path, evdev: str = GLOBAL_TOUCH_DEVICE):
+        """
+        Adversarial-free closed-loop trajectory via analytic degree-5 Bézier curve.
+
+        Mathematical guarantee:
+          B(0) = B(1) = center   (closed loop, no net displacement)
+          B'(0) = B'(1) = 0      (zero start/end velocity → no residual scroll)
+
+        More principled than human-recorded circles (action 4) and avoids the
+        residual-scroll problem of uniform-speed circles (action 3).
+        """
+        center_x, center_y = MotionGenerator.read_tap_positions()
+        trace = MotionGenerator._bezier_closed_loop_trace(center_x, center_y)
+        trace_gotevent = MotionGenerator.swipe_to_event_trace(trace=trace, evdev=evdev)
+        MotionGenerator.flush_event_sequence(adb_path, evdev, trace_gotevent)
+
 # --- Action Functions ---
 
 def do_type(adb_path: str, text: str, use_adb_keyboard_for_all_keys: bool = False, enable_logging: bool = True):
@@ -661,6 +767,8 @@ def main():
                         MotionGenerator.custom_fake_action_3(adb_path)
                     elif args[3] == "custom_fake_action_4":
                         MotionGenerator.custom_fake_action_4(adb_path)
+                    elif args[3] == "custom_fake_action_5":
+                        MotionGenerator.custom_fake_action_5(adb_path)
                     else:
                         raise ValueError
                 else:
