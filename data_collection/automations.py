@@ -1,4 +1,4 @@
-from enum import Enum
+from enum import Enum, auto
 import os
 import sys
 import time
