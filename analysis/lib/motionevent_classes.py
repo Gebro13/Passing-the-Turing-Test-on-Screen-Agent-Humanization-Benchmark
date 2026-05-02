@@ -43,6 +43,13 @@ def is_integral(trace: SingularActionType) -> bool:
 
 SessionType = Tuple[str, List[SingularActionType]]  # (session_id, list of Events)
 
+def get_session_singular_actions(session: SessionType) -> List[SingularActionType]:
+    """
+        Given a session, return the list of SingularActionType (list of list of Events) for that session.
+    """
+    session_id, singular_actions = session
+    return singular_actions
+
 @dataclass
 class SwipeFeaturedSessionType:
     session_id: str

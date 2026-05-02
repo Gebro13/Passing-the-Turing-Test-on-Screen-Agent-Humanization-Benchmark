@@ -59,12 +59,19 @@ resume_event = threading.Event()
 # create a enum class of "custom_fake_action_3", "custom_fake_action_4", "custom_fake_action_5" and make sure it is validated
 # now begin:
 class CustomFakeAction(Enum):
-    CUSTOM_FAKE_ACTION_3 = "custom_fake_action_3"
-    CUSTOM_FAKE_ACTION_4 = "custom_fake_action_4"
-    CUSTOM_FAKE_ACTION_5 = "custom_fake_action_5"
+    CUSTOM_FAKE_ACTION_3 = auto()
+    CUSTOM_FAKE_ACTION_4 = auto()
+    CUSTOM_FAKE_ACTION_5 = auto()
+    NONE = auto()
+
+    def to_command_string(self) -> str:
+        """Return the string expected by adb_wrapper.py's dispatch logic."""
+        if self == CustomFakeAction.NONE:
+            raise ValueError("CustomFakeAction.NONE does not correspond to a real command string.")
+        return self.name.lower()
 
 
-current_fake_action = CustomFakeAction.CUSTOM_FAKE_ACTION_3
+current_fake_action = CustomFakeAction.NONE
 
 def run_useless_action_loop_method_2(mean_interval_seconds: float = 1.1):
     """
@@ -82,7 +89,8 @@ def run_useless_action_loop_method_2(mean_interval_seconds: float = 1.1):
         # get the absolute path of the file
         fake_adb_py_path = FAKE_ADB_PATH_ABSOLUTE / "adb_wrapper.py"
 
-        os.system(f"python {fake_adb_py_path} shell input fake {current_fake_action.value} 2> /dev/null")
+        if current_fake_action != CustomFakeAction.NONE:
+            os.system(f"python {fake_adb_py_path} shell input fake {current_fake_action.to_command_string()} 2> /dev/null")
 
 
 
@@ -458,6 +466,12 @@ try:
     os.system("adb devices")
     if __name__ == "__main__":
         time.sleep(1.0) # wait for adb to stabilize
+        # check whether the current keyboard is the adbkeyboard, if not, print warning and switch to adbkeyboard
+        current_keyboard = os.popen("adb shell settings get secure default_input_method").read().strip()
+        if "adbkeyboard" not in current_keyboard:
+            print("Warning: The current keyboard is not adbkeyboard, which may cause agent typing to fail. Switching to adbkeyboard...")
+            os.system("adb shell ime set com.android.adbkeyboard/.AdbIME")
+            time.sleep(1.0) # wait for the keyboard to switch
 
     if __name__ == "__main__": # + "start_useless_action_loop":
         # create a subprocess to run the useless action loop

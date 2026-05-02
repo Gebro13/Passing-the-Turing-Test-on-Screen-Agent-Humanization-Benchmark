@@ -18,6 +18,9 @@ import argparse
 import os
 import time
 import data_collection.automations as automations
+from analysis.lib.gesture_log_reader_utils import gesture_log_schema
+from analysis.lib.key_reader_utils import IME_event_name_schema
+from analysis.lib.sensor_log_reader_utils import sensor_recording_name_schema
 
 
 def assert_equal_paths():
@@ -89,11 +92,11 @@ if __name__ == "__main__":
     absolute_base_path = basepath.resolve()
 
     timestamp = automations.generate_timestamp()
-    output_path = str(basepath / f"gesture_recording_{timestamp}.log")
+    output_path = str(basepath / gesture_log_schema(timestamp))
     output_video = str(basepath / f"screen_recording_{timestamp}.mp4")
-    absolute_output_IME_path = str(absolute_base_path / f"IME_event_{timestamp}.txt")
+    absolute_output_IME_path = str(absolute_base_path / IME_event_name_schema(timestamp))
 
-    output_sensor_path = str(basepath / f"sensor_recording_{timestamp}.txt")
+    output_sensor_path = str(basepath / f"{sensor_recording_name_schema(timestamp)}.txt")
     sensor_apk_name = "com.example.motionlogger"
     input_sensor_path = f"/sdcard/Android/data/{sensor_apk_name}/Files/motion_log.txt"
 

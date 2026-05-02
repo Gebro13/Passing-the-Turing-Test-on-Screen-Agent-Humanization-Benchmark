@@ -1,3 +1,4 @@
+from itertools import islice
 from typing import Any, Final, Optional, List, Dict, Tuple, Callable, Union
 import re
 from re import Match
@@ -13,6 +14,9 @@ logger = logging.getLogger(__name__)
 
 def hex_to_dec(hex_str: str) -> int:
     return int(hex_str, 16)
+
+def gesture_log_schema(timestamp: str) -> str:
+    return f"gesture_recording_{timestamp}.log"
 
 def file_finder(search_scope: Path, file_name: str) -> Path:
     """
@@ -68,6 +72,13 @@ def file_reader_yield(file_path: Union[str, Path]) -> List[str]:
     with open(file_path, 'r', encoding='utf-8') as file:
         lines = file.readlines()
     return lines
+
+def limited_file_reader_yield(file_path: Union[str, Path], head_lines: int) -> List[str]:
+    """
+    Generator to read a file line by line, but only yield the first `head_lines` lines.
+    """
+    with open(file_path, 'r', encoding='utf-8') as file:
+        return list(islice(file, head_lines)) # most performant and bugless way as opus-4-6 says; file handler does not read the whole file into memory, and islice handles the stopping condition perfectly without risk of off-by-one errors or extra reads.
 
 def single_trace_generator(adb_getevent_generator: List[str]) -> List[SingularActionType]:
     """
@@ -244,7 +255,7 @@ def gesture_generator_from_files(df_idx: pd.DataFrame, logs_dir: Path) -> List[T
         log_num: str = str(row["log_num"])  # e.g., 20250714_162513
         label: str = str(row["type"])      # class label
         # Construct file name like draw_motion_event2 defaults
-        log_file = logs_dir / f"gesture_recording_{log_num}.log"
+        log_file = logs_dir / gesture_log_schema(log_num)
         if not log_file.exists():
             raise DeprecationWarning("df_idx rather outdated. Fix this before fixing the logging.")
             print(f"Missing log: {log_file}")
@@ -314,7 +325,7 @@ def check_integrity_of_logs(df_idx: pd.DataFrame, logs_dir: Path) -> None:
     missing_logs = []
     for _, row in df_idx.iterrows():
         session_timestamp: str = str(row["log_num"])  # e.g., 20250714_162513
-        log_file = logs_dir / f"gesture_recording_{session_timestamp}.log"
+        log_file = logs_dir / gesture_log_schema(session_timestamp)
         if not log_file.exists():
             missing_logs.append(log_file)
     if missing_logs:
@@ -349,6 +360,115 @@ def throw_away_sample_with_none(thingy_to_filter: List[Any]) -> List[SingularAct
 
 
 
+def session_noexcept_handling(stripped_timestamp: str) -> Optional[SessionType]:
+    """
+        If return None, then it's ignorable.
+    """
+    try:
+        file_path = file_finder(Path("logs/"), "gesture_recording_" + stripped_timestamp + ".log")
+    except FileNotFoundError as e:
+        logger.error("%s: %s", e)
+        raise e
+    line_generator = file_reader_yield(str(file_path))
+
+    try:
+        single_trace_generated = single_trace_generator(line_generator)
+        
+    except ValueError as e:
+        if "Multiple Unexpected log format" in e.args[0]:
+            logger.warning("Error processing file %s: %s. Multiple unexpected log format issues encountered.", file_path, e.args[0])
+            thingy_to_filter = e.args[1] # the generated trace with potential None samples and the last trace with potential incomplete sample.
+            single_trace_generated = throw_away_sample_with_none(thingy_to_filter) # the generated trace with None samples and the last incomplete sample thrown away.
+            logger.warning("Kept %d complete samples from all %d samples in the generated trace.", len(single_trace_generated), len(thingy_to_filter))
+
+        if "incomplete sample" in e.args[0]:
+            logger.warning("Incomplete sample detected in file %s. This may indicate an unexpected log format or missing lines. Keeping the traces with complete properties.", file_path)
+            thingy_to_filter = e.args[1] # the generated trace with potential None samples.
+            single_trace_generated = throw_away_sample_with_none(thingy_to_filter) # the generated trace with None samples thrown away.
+            logger.warning("Kept %d complete samples from all %d samples in the generated trace.", len(single_trace_generated), len(thingy_to_filter))
+
+        elif "without proper termination" in e.args[0]:
+            logger.warning("Error processing file %s: %s. Discarding the last incomplete trace.", file_path, e.args[0])
+            single_trace_generated = e.args[1] # compact stacked traces are contact.
+
+        elif "invalid id inheritance" in e.args[0]:
+            logger.error("Error processing file %s: %s. Skipping this file.", file_path, e)
+            return None
+
+        else:
+            logger.error("Error processing file %s: %s", file_path, e)
+            raise e
+
+    except NotImplementedError as e:
+        if "Multitouch event found in line" in e.args[0]:
+            logger.warning("Multitouch event found in file %s, which is unexpected and currently not supported. Skipping this file.", file_path)
+            return None
+        else:
+            logger.error("Error processing file %s: %s", file_path, e)
+            raise e
+    return (stripped_timestamp, single_trace_generated)
+
+def extract_sessions(legal_timestamp_list: Dict[str, List[Tuple[int, str]]],      
+        batched_filtering_and_modification_function: Optional[
+            Callable[[List[SingularActionType]], List[SingularActionType]]
+        ] = None, 
+        humanity_disturbance: Optional[
+            Callable[[SingularActionType], SingularActionType]
+        ] = None
+                     ) -> List[SessionType]:
+    result: List[SessionType] = []
+    for participant, timestamp_tuples in legal_timestamp_list.items():
+        for task_idx, stripped_timestamp in timestamp_tuples:
+            # assert that the timestamp follow the yyyymmdd_hhmmss format, otherwise the log format is unexpected and we raise an error.
+            
+            single_trace_generated = session_noexcept_handling(stripped_timestamp)
+
+            if single_trace_generated is None:
+                continue
+            _, single_trace_generated = single_trace_generated
+
+            if batched_filtering_and_modification_function is not None:
+                swipe_generated = batched_filtering_and_modification_function(single_trace_generated)
+            else:
+                swipe_generated = single_trace_generated
+            if humanity_disturbance is not None:
+                swipe_generated = [
+                    humanity_disturbance(swipe_without_final_point)
+                    for swipe_without_final_point in swipe_generated
+                ]
+            result.append((stripped_timestamp, swipe_generated)) # TODO unrigorous constructor for SessionType. Change to TypedDict in the future. 
+    return result
+
+
+def rectify_timestamp_idx(
+        formatted_data_timestamps_df: pd.DataFrame,
+        participants: List[str],
+        orthodox_data_regex: str = r'\d{8}_\d{6}',
+    ) -> Dict[str, List[Tuple[int, str]]]:
+    """
+    Convert a DataFrame of formatted data timestamps into a dictionary mapping participant names to lists of (task_idx, timestamp) tuples.
+    For participants not found in the DataFrame columns, an empty list is assigned.
+    For errorneous entries (e.g., NaN or empty strings or illegal strings), those entries are skipped.
+    
+    :param formatted_data_timestamps_df: dataframe with participant names as columns and timestamps as values
+    :type formatted_data_timestamps_df: pd.DataFrame
+    :param participants: List of participant names to include; used to extract the columns of formatted_data_timestamps_df
+    :return:  {participant: [(task_idx, timestamp), ...] }
+    :rtype: Dict[str, List[Tuple[int, str]]]
+    """
+    
+    result: Dict[str, List[Tuple[int, str]]] = {}
+    for participant in participants:
+        if participant not in formatted_data_timestamps_df.columns:
+            result[participant] = []
+            continue
+            # raise ValueError(f"Participant {participant} not found in DataFrame columns.")
+        timestamps = formatted_data_timestamps_df[participant].dropna().astype(str)
+        # read timestamps as a series
+        result_participant: List[Tuple[int, str]] = [(idx, ts.strip()) for idx, ts in timestamps.items() if (re.fullmatch(orthodox_data_regex, ts.strip()) is not None)]
+        result[participant] = result_participant
+    return result
+
 def ranged_batched_modified_generator_with_session_timestamp(
         formated_data_timestamps: pd.DataFrame, 
         participants: List[str], 
@@ -363,82 +483,21 @@ def ranged_batched_modified_generator_with_session_timestamp(
     """
     formated_data_timestamps: DataFrame with participant names as columns and timestamps as values
     """
-    result: List[SessionType] = []
-    for participant_name in participants:
-        for index, timestamp in enumerate(formated_data_timestamps[participant_name]):
-            #print(participant_name, index, timestamp)
-            if (index_range is not None) and (index not in index_range):
-                continue
-            
-            if pd.isnull(timestamp):
-                # print(f"Warning: Null timestamp found for participant {participant_name} at index {index}. Skipping this entry.")
-                continue
+    todo_timestamp_structs = rectify_timestamp_idx(
+        formatted_data_timestamps_df=formated_data_timestamps,
+        participants=participants
+    )
+    for participant in todo_timestamp_structs.keys():
+        todo_timestamp_structs[participant] = [
+            (idx, ts) for idx, ts in todo_timestamp_structs[participant]
+            if (index_range is None) or (idx in index_range)
+        ]
 
-            stripped_timestamp = str(timestamp).strip()
-            if (stripped_timestamp == ""):
-                continue
-            #print(stripped_timestamp)
-            #continue
-
-            # assert that the timestamp follow the yyyymmdd_hhmmss format, otherwise the log format is unexpected and we raise an error.
-            if not re.match(r'^\d{8}_\d{6}$', stripped_timestamp):
-                logger.warning("Unexpected timestamp format for participant %s at index %d: '%s'", participant_name, index, timestamp)
-                continue
-            
-            try:
-                file_path = file_finder(Path("logs/"), "gesture_recording_" + stripped_timestamp + ".log")
-            except FileNotFoundError as e:
-                logger.error("%s: %s", participant_name, e)
-                raise e
-            line_generator = file_reader_yield(str(file_path))
-
-            try:
-                single_trace_generated = single_trace_generator(line_generator)
-                
-            except ValueError as e:
-                if "Multiple Unexpected log format" in e.args[0]:
-                    logger.warning("Error processing file %s: %s. Multiple unexpected log format issues encountered.", file_path, e.args[0])
-                    thingy_to_filter = e.args[1] # the generated trace with potential None samples and the last trace with potential incomplete sample.
-                    single_trace_generated = throw_away_sample_with_none(thingy_to_filter) # the generated trace with None samples and the last incomplete sample thrown away.
-                    logger.warning("Kept %d complete samples from all %d samples in the generated trace.", len(single_trace_generated), len(thingy_to_filter))
-
-                if "incomplete sample" in e.args[0]:
-                    logger.warning("Incomplete sample detected in file %s. This may indicate an unexpected log format or missing lines. Keeping the traces with complete properties.", file_path)
-                    thingy_to_filter = e.args[1] # the generated trace with potential None samples.
-                    single_trace_generated = throw_away_sample_with_none(thingy_to_filter) # the generated trace with None samples thrown away.
-                    logger.warning("Kept %d complete samples from all %d samples in the generated trace.", len(single_trace_generated), len(thingy_to_filter))
-
-                elif "without proper termination" in e.args[0]:
-                    logger.warning("Error processing file %s: %s. Discarding the last incomplete trace.", file_path, e.args[0])
-                    single_trace_generated = e.args[1] # compact stacked traces are contact.
-
-                elif "invalid id inheritance" in e.args[0]:
-                    logger.error("Error processing file %s: %s. Skipping this file.", file_path, e)
-                    continue
-
-                else:
-                    logger.error("Error processing file %s: %s", file_path, e)
-                    raise e
-
-            except NotImplementedError as e:
-                if "Multitouch event found in line" in e.args[0]:
-                    logger.warning("Multitouch event found in file %s, which is unexpected and currently not supported. Skipping this file.", file_path)
-                    continue
-                else:
-                    logger.error("Error processing file %s: %s", file_path, e)
-                    raise e
-
-            if batched_filtering_and_modification_function is not None:
-                swipe_generated = batched_filtering_and_modification_function(single_trace_generated)
-            else:
-                swipe_generated = single_trace_generated
-            if humanity_disturbance is not None:
-                swipe_generated = [
-                    humanity_disturbance(swipe_without_final_point)
-                    for swipe_without_final_point in swipe_generated
-                ]
-            result.append((stripped_timestamp, swipe_generated)) # TODO unrigorous constructor for SessionType. Change to TypedDict in the future. 
-    return result
+    return extract_sessions(
+        legal_timestamp_list=todo_timestamp_structs,
+        batched_filtering_and_modification_function=batched_filtering_and_modification_function,
+        humanity_disturbance=humanity_disturbance
+    )
 
 
 def ranged_batched_modified_generator_without_session_timestamp(
@@ -526,35 +585,6 @@ def ranged_modified_generator_with_session_timestamp(
             batched_filtering_and_modification_function=batched_modifying_function,
             humanity_disturbance=humanity_disturbance
         )
-
-def rectify_timestamp_idx(
-        formatted_data_timestamps_df: pd.DataFrame,
-        participants: List[str],
-        orthodox_data_regex: str = r'\d{8}_\d{6}',
-    ) -> Dict[str, List[Tuple[int, str]]]:
-    """
-    Convert a DataFrame of formatted data timestamps into a dictionary mapping participant names to lists of (task_idx, timestamp) tuples.
-    For participants not found in the DataFrame columns, an empty list is assigned.
-    For errorneous entries (e.g., NaN or empty strings or illegal strings), those entries are skipped.
-    
-    :param formatted_data_timestamps_df: dataframe with participant names as columns and timestamps as values
-    :type formatted_data_timestamps_df: pd.DataFrame
-    :param participants: List of participant names to include; used to extract the columns of formatted_data_timestamps_df
-    :return:  {participant: [(task_idx, timestamp), ...] }
-    :rtype: Dict[str, List[Tuple[int, str]]]
-    """
-    
-    result: Dict[str, List[Tuple[int, str]]] = {}
-    for participant in participants:
-        if participant not in formatted_data_timestamps_df.columns:
-            result[participant] = []
-            continue
-            # raise ValueError(f"Participant {participant} not found in DataFrame columns.")
-        timestamps = formatted_data_timestamps_df[participant].dropna().astype(str)
-        # read timestamps as a series
-        result_participant: List[Tuple[int, str]] = [(idx, ts.strip()) for idx, ts in timestamps.items() if (re.fullmatch(orthodox_data_regex, ts.strip()) is not None)]
-        result[participant] = result_participant
-    return result
 
 if __name__ == "__main__":
     print("Temporarily using this file's main execution as log sanity check.")

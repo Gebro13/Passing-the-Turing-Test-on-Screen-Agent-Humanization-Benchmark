@@ -1,6 +1,6 @@
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, TypedDict
-from analysis.lib.gesture_log_reader_utils import file_finder
+from analysis.lib.gesture_log_reader_utils import file_finder, file_reader_yield
 from analysis.plotting.draw_sensor_event import parse_as_df
 import pandas as pd
 
@@ -16,6 +16,8 @@ class SensorSessionType(TypedDict):
     time_offset_ns: int
     sensor_data_for_each_sensor_type: Dict[str, pd.DataFrame]
 
+def sensor_recording_name_schema(timestamp: str) -> str:
+    return f"sensor_recording_{timestamp}.txt"
 
 def ranged_batched_modified_sensor_generator_with_session_timestamp(
         formated_data_timestamps_rectified: Dict[str, List[Tuple[int, str]]], 
@@ -46,14 +48,15 @@ def ranged_batched_modified_sensor_generator_with_session_timestamp(
             filtered_task_timestamps = task_timestamps
         for task_id, timestamp in (tqdm if use_tqdm_for_each_participant else lambda x: x)(filtered_task_timestamps):
             try:
-                sensor_file_path = file_finder(search_scope=Path("logs/"), file_name=f"sensor_recording_{timestamp}.txt")
+                sensor_file_path = file_finder(search_scope=Path("logs/"), file_name=sensor_recording_name_schema(timestamp))
             except FileNotFoundError as fe:
                 print(f"Warning: {fe}. timestamp: {timestamp} is not found.")
                 continue
             
             if sensor_file_path is None:
                 raise FileNotFoundError(f"Sensor log file not found for participant {participant}, task {task_id}, timestamp {timestamp}")
-            time_offset_ns, all_sensor_data = parse_as_df(str(sensor_file_path))
+            lines = file_reader_yield(sensor_file_path)
+            time_offset_ns, all_sensor_data = parse_as_df(lines)
             
             result.append(SensorSessionType(
                 session_timestamp = timestamp,

@@ -4,9 +4,9 @@ from typing import Dict, List, Tuple, Union
 import pandas as pd
 from pathlib import Path
 import argparse
+from analysis.lib.gesture_log_reader_utils import file_reader_yield
 
-
-def parse_sensor_file(file_path: str
+def parse_sensor_file(lines: List[str]
 ) -> Tuple[int,        Dict[str,    Dict[str,               List[float]]]]:
     """                      ^            ^                      ^
 a single timestamp offset and             t/x/y/z
@@ -29,62 +29,61 @@ a single timestamp offset and             t/x/y/z
     }
 
     first_line_number: int = 0
-    with open(file_path, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
-        first_line = lines[0]
-        first_line_number_matcher = re.match(r"^(\d+)$", first_line)
-        if first_line_number_matcher and (first_line_number == 0):
-            first_line_number = int(first_line_number_matcher.group(1))
-        else:
-            raise ValueError(f"Unexpected first line format: {first_line} in file {file_path}; should be an offset in nanoseconds")
+
+    first_line = lines[0]
+    first_line_number_matcher = re.match(r"^(\d+)$", first_line)
+    if first_line_number_matcher and (first_line_number == 0):
+        first_line_number = int(first_line_number_matcher.group(1))
+    else:
+        raise ValueError(f"Unexpected first line format: {first_line} in file {file_path}; should be an offset in nanoseconds")
+    
+    for line in lines[1:]:
+
         
-        for line in lines[1:]:
+        
+        # first determine the type:
+        m_type = re.match(r"(\d+)\s+(Accelerometer|Gyroscope|RotationVector|Gravity|LinearAcceleration|MagneticField|Light|MotionDetector|Pressure|Proximity|StepCounter|StepDetector):\s*", line)
+        if m_type is None:
+            continue
+        t_str, sensor_type = m_type.groups()
+        t = int(t_str)
 
-            
-            
-            # first determine the type:
-            m_type = re.match(r"(\d+)\s+(Accelerometer|Gyroscope|RotationVector|Gravity|LinearAcceleration|MagneticField|Light|MotionDetector|Pressure|Proximity|StepCounter|StepDetector):\s*", line)
-            if m_type is None:
-                continue
-            t_str, sensor_type = m_type.groups()
-            t = int(t_str)
+        if sensor_type in ["Light", "MotionDetector", "Pressure", "Proximity", "StepCounter", "StepDetector"]:
+            m_value = re.match(r"(\d+)\s+(Light|MotionDetector|Pressure|Proximity|StepCounter|StepDetector):\s*value=([-\d.]+)", line)
+            if m_value is None:
+                raise ValueError(f"Cannot parse line: {line}, which is expected to have single value for sensor {sensor_type}")
+            t, sensor, value = m_value.groups()
+            sensor_data[sensor]['t'].append(int(t))
+            sensor_data[sensor]['value'].append(float(value))
 
-            if sensor_type in ["Light", "MotionDetector", "Pressure", "Proximity", "StepCounter", "StepDetector"]:
-                m_value = re.match(r"(\d+)\s+(Light|MotionDetector|Pressure|Proximity|StepCounter|StepDetector):\s*value=([-\d.]+)", line)
-                if m_value is None:
-                    raise ValueError(f"Cannot parse line: {line}, which is expected to have single value for sensor {sensor_type}")
-                t, sensor, value = m_value.groups()
-                sensor_data[sensor]['t'].append(int(t))
-                sensor_data[sensor]['value'].append(float(value))
+        elif sensor_type == "RotationVector":
+            m_value = re.match(r"(\d+)\s+RotationVector:\s*i=([-\d.]+),\s*j=([-\d.]+),\s*k=([-\d.]+),\s*w=([-\d.]+),\s*accuracy=([-\d.]+)", line)
+            if m_value is None:
+                raise ValueError(f"Cannot parse line: {line}, which is expected to have i/j/k/w/accuracy for sensor RotationVector")
+            t, i, j, k, w, accuracy = m_value.groups()
+            sensor_data['RotationVector']['t'].append(int(t))
+            sensor_data['RotationVector']['i'].append(float(i))
+            sensor_data['RotationVector']['j'].append(float(j))
+            sensor_data['RotationVector']['k'].append(float(k))
+            sensor_data['RotationVector']['w'].append(float(w))
+            sensor_data['RotationVector']['accuracy'].append(float(accuracy))
 
-            elif sensor_type == "RotationVector":
-                m_value = re.match(r"(\d+)\s+RotationVector:\s*i=([-\d.]+),\s*j=([-\d.]+),\s*k=([-\d.]+),\s*w=([-\d.]+),\s*accuracy=([-\d.]+)", line)
-                if m_value is None:
-                    raise ValueError(f"Cannot parse line: {line}, which is expected to have i/j/k/w/accuracy for sensor RotationVector")
-                t, i, j, k, w, accuracy = m_value.groups()
-                sensor_data['RotationVector']['t'].append(int(t))
-                sensor_data['RotationVector']['i'].append(float(i))
-                sensor_data['RotationVector']['j'].append(float(j))
-                sensor_data['RotationVector']['k'].append(float(k))
-                sensor_data['RotationVector']['w'].append(float(w))
-                sensor_data['RotationVector']['accuracy'].append(float(accuracy))
-
-            elif sensor_type in ["Accelerometer", "Gyroscope", "Gravity", "LinearAcceleration", "MagneticField"]:
-                m_value = re.match(r"(\d+)\s+(Accelerometer|Gyroscope|Gravity|LinearAcceleration|MagneticField):\s*x=([-\d.]+)\s*y=([-\d.]+)\s*z=([-\d.]+)", line)
-                if m_value is None:
-                    raise ValueError(f"Cannot parse line: {line}, which is expected to have x/y/z for sensor {sensor_type}")
-                t, sensor, x, y, z = m_value.groups()
-                sensor_data[sensor]['t'].append(int(t))
-                sensor_data[sensor]['x'].append(float(x))
-                sensor_data[sensor]['y'].append(float(y))
-                sensor_data[sensor]['z'].append(float(z))
-            else:
-                raise ValueError(f"Unknown sensor type in line: {line}")
+        elif sensor_type in ["Accelerometer", "Gyroscope", "Gravity", "LinearAcceleration", "MagneticField"]:
+            m_value = re.match(r"(\d+)\s+(Accelerometer|Gyroscope|Gravity|LinearAcceleration|MagneticField):\s*x=([-\d.]+)\s*y=([-\d.]+)\s*z=([-\d.]+)", line)
+            if m_value is None:
+                raise ValueError(f"Cannot parse line: {line}, which is expected to have x/y/z for sensor {sensor_type}")
+            t, sensor, x, y, z = m_value.groups()
+            sensor_data[sensor]['t'].append(int(t))
+            sensor_data[sensor]['x'].append(float(x))
+            sensor_data[sensor]['y'].append(float(y))
+            sensor_data[sensor]['z'].append(float(z))
+        else:
+            raise ValueError(f"Unknown sensor type in line: {line}")
             
     return first_line_number, sensor_data
 
-def parse_as_df(file_path: str) -> Tuple[int, Dict[str, pd.DataFrame]]:
-    first_line_number, sensor_data = parse_sensor_file(file_path)
+def parse_as_df(lines: List[str]) -> Tuple[int, Dict[str, pd.DataFrame]]:
+    first_line_number, sensor_data = parse_sensor_file(lines)
     sensor_data_df: Dict[str, pd.DataFrame] = {}
     for sensor_type in sensor_data.keys():
         pseudo_dataframe = sensor_data[sensor_type]
@@ -96,12 +95,13 @@ def sensor_generator_from_files(df_idx: pd.DataFrame, logs_dir: Path
     """Read df_idx(the catalog of logs), iterate logs, extract unmodified swipes, and return a list.    
     The resulting DataFrame has a 'type' column followed by feature columns.
     """
+    raise NotImplementedError("sensor_generator_from_files is deprecated and will be removed in the future. Consider using ranged_batched_modified_sensor_generator_with_session_timestamp instead for more flexible data loading and processing.")
     result: List[Tuple[str, Tuple[int, Dict[str, pd.DataFrame]]]] = []
     for _, row in df_idx.iterrows():
         log_num: str = str(row["log_num"])  # e.g., 20250714_162513
         label: str = str(row["type"])      # class label
         # Construct file name like draw_motion_event2 defaults
-        log_file = logs_dir / f"sensor_recording_{log_num}.txt"
+        log_file = logs_dir / sensor_recording_name_schema(log_num)
         if not log_file.exists():
             print(f"Missing log: {log_file}")
             continue
