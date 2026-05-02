@@ -452,6 +452,42 @@ class MotionGenerator:
         MotionGenerator.flush_event_sequence(adb_path, evdev, trace_gotevent)
 
     @staticmethod
+    def is_custom_fake_action_3(trace: List[FingerEvent], min_circle_points: int = 30, radius_tolerance_ratio: float = 0.15) -> bool:
+        """
+        Heuristic: check if there exists a candidate center point such that
+        >= min_circle_points of the trace points lie at roughly the same
+        distance from it (i.e. on a circle).
+
+        We use the centroid of all points as the candidate center, compute
+        each point's distance to it, take the median distance as the
+        candidate radius, and count how many points fall within
+        [r*(1-tol), r*(1+tol)].
+        """
+        if len(trace) < min_circle_points:
+            return False
+        
+        trace = trace[:36]
+
+        xs = [p.x for p in trace]
+        ys = [p.y for p in trace]
+        cx = sum(xs) / len(xs)
+        cy = sum(ys) / len(ys)
+
+        dists = [math.hypot(p.x - cx, p.y - cy) for p in trace]
+        median_r = sorted(dists)[len(dists) // 2]
+        if median_r < 40:  # degenerate — all points basically at the same spot (tap)
+            return False
+        
+        if median_r > 60:
+            return False
+
+        lo = median_r * (1 - radius_tolerance_ratio)
+        hi = median_r * (1 + radius_tolerance_ratio)
+        count = sum(1 for d in dists if lo <= d <= hi)
+
+        return count >= min_circle_points
+
+    @staticmethod
     def custom_fake_action_4(adb_path, evdev: str = GLOBAL_TOUCH_DEVICE):
         # one-shot anyway.
 
